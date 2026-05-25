@@ -34,9 +34,9 @@ void ObjectDraw::AddObject(const char* name, ObjectType Ot)
 	size.push_back(1.0f);
 }
 
-std::vector<Vertex> ObjectDraw::CreatePolygon(const char* name)
+std::vector<PolygonState> ObjectDraw::CreatePolygon(const char* name)
 {
-	std::vector<Vertex> vertices;
+	std::vector<PolygonState> vertices;
 
 	int Idx = NameToIndex(name);
 

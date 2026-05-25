@@ -11,7 +11,7 @@ enum class ObjectType
 	None,
 	Polygon,
 };
-struct Vertex
+struct PolygonState
 {
 	float x, y, z;
 	float r, g, b, a;
@@ -30,15 +30,15 @@ public:
 	void AddObject(const char* name, ObjectType Ot);
 	bool SetType(ObjectType Ot);
 	void AllDraw();
-	std::vector<Vertex> CreatePolygon(const char* name);
+	std::vector<PolygonState> CreatePolygon(const char* name);
 };
 
 #include <vector>
 #include <cmath>
 
-std::vector<Vertex> CreatePolygon(int sides, float radius)
+std::vector<PolygonState> CreatePolygon(int sides, float radius)
 {
-	std::vector<Vertex> vertices;
+	std::vector<PolygonState> vertices;
 
 	// íÜêSì_
 	vertices.push_back({ 0.0f, 0.0f, 0.0f, 1,1,1,1 });
