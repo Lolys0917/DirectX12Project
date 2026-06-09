@@ -3,19 +3,22 @@
 // DX12 Texture Sample
 // ==========================================================
 
+#define NOMINMAX
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
 #include <windows.h>
-#include <wrl.h>
 #include <d3d12.h>
+#include "d3dx12.h"
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
+#include <wrl.h>
 #include <wincodec.h>
-
 #include <vector>
 #include <string>
 #include <unordered_map>
 #include <cmath>
-
-#include "d3dx12.h"
+#include <DirectXMath.h>
 
 #pragma comment(lib,"d3d12.lib")
 #pragma comment(lib,"dxgi.lib")
@@ -36,6 +39,7 @@ const int FRAME_COUNT = 2;
 // 構造体
 // ==========================================================
 
+//ポリゴン用________
 struct Vertex
 {
     float x, y, z;
@@ -46,7 +50,6 @@ struct PolygonState
     float x, y, z;
     float r, g, b, a;
 };
-
 struct TextureData
 {
     ComPtr<ID3D12Resource> resource;
@@ -56,6 +59,45 @@ struct TextureData
     UINT width = 0;
     UINT height = 0;
 };
+struct TextureSettingsData
+{
+    const char* textureName;
+    TextureData textureData;
+};
+
+//モデル用___________
+struct ModelVertex
+{
+    DirectX::XMFLOAT3 Position;
+    DirectX::XMFLOAT3 Normal;
+    DirectX::XMFLOAT2 UV;
+};
+class Mesh
+{
+public:
+    std::vector<ModelVertex> Vertex;
+    std::vector<unsigned int> Index;
+};
+class Model
+{
+public:
+    std::vector<Mesh> ModelMesh;
+};
+class ModelLoader
+{
+public:
+    static bool LoadFBX(
+        const std::string& filename,
+        Model& model);
+};
+static void ProcessNode(
+    aiNode* node,
+    const aiScene* scene,
+    Model& model);
+
+static Mesh ProcessMesh(
+    aiMesh* mesh,
+    const aiScene* scene);
 
 // ==========================================================
 // グローバル
@@ -96,6 +138,8 @@ D3D12_VERTEX_BUFFER_VIEW vbView{};
 UINT vertexCount = 0;
 
 std::unordered_map<std::string, TextureData> g_textures;
+
+std::vector<TextureSettingsData> g_vTexSetData;
 
 // ==========================================================
 // ウィンドウ
@@ -296,7 +340,6 @@ void InitD3D()
             nullptr,
             rtvHandle
         );
-
         rtvHandle.Offset(
             1,
             rtvDescriptorSize
@@ -381,7 +424,7 @@ bool LoadTexture(
 )
 {
     HRESULT hr;
-
+    
     IWICImagingFactory* wicFactory = nullptr;
 
     CoInitializeEx(
@@ -955,10 +998,13 @@ void Render()
     // Texture
     // ======================================================
 
-    commandList->SetGraphicsRootDescriptorTable(
-        0,
-        g_textures["test"].gpuHandle
-    );
+    for(int i = 0; i < g_textures.size(); i++)
+    {
+        commandList->SetGraphicsRootDescriptorTable(
+            0,
+            g_textures["test"].gpuHandle
+        );
+    }
 
     // ======================================================
     // Barrier
@@ -1208,6 +1254,134 @@ void CreateVertexBuffer(int sides)
     vbView.BufferLocation = vertexBuffer->GetGPUVirtualAddress();
     vbView.SizeInBytes = size;
     vbView.StrideInBytes = sizeof(Vertex);
+}
+
+//====================
+// モデル
+//====================
+static void ProcessNode(
+    aiNode* node,
+    const aiScene* scene,
+    Model& model)
+{
+    for (UINT i = 0; i < node->mNumMeshes; i++)
+    {
+        aiMesh* mesh =
+            scene->mMeshes[
+                node->mMeshes[i]
+            ];
+
+        model.ModelMesh.push_back(
+            ProcessMesh(
+                mesh,
+                scene
+            )
+        );
+    }
+
+    for (UINT i = 0; i < node->mNumChildren; i++)
+    {
+        ProcessNode(
+            node->mChildren[i],
+            scene,
+            model
+        );
+    }
+}
+bool ModelLoader::LoadFBX(
+    const std::string& filename,
+    Model& model)
+{
+    Assimp::Importer importer;
+
+    const aiScene* scene =
+        importer.ReadFile(
+            filename,
+
+            aiProcess_Triangulate |
+            aiProcess_GenNormals |
+            aiProcess_FlipUVs |
+            aiProcess_JoinIdenticalVertices
+        );
+
+    if (!scene)
+    {
+        return false;
+    }
+
+    if (!scene->mRootNode)
+    {
+        return false;
+    }
+
+    ProcessNode(
+        scene->mRootNode,
+        scene,
+        model);
+
+    return true;
+}
+
+static Mesh ProcessMesh(
+    aiMesh* mesh,
+    const aiScene* scene)
+{
+    Mesh result;
+    for (UINT i = 0; i < mesh->mNumVertices; i++)
+    {
+        ModelVertex v;
+
+        v.Position.x =
+            mesh->mVertices[i].x;
+
+        v.Position.y =
+            mesh->mVertices[i].y;
+
+        v.Position.z =
+            mesh->mVertices[i].z;
+
+        if (mesh->HasNormals())
+        {
+            v.Normal.x =
+                mesh->mNormals[i].x;
+
+            v.Normal.y =
+                mesh->mNormals[i].y;
+
+            v.Normal.z =
+                mesh->mNormals[i].z;
+        }
+
+        if (mesh->mTextureCoords[0])
+        {
+            v.UV.x =
+                mesh->mTextureCoords[0][i].x;
+
+            v.UV.y =
+                mesh->mTextureCoords[0][i].y;
+        }
+        else
+        {
+            v.UV = { 0.0f,0.0f };
+        }
+
+        result.Vertex.push_back(v);
+    }
+    for (UINT i = 0; i < mesh->mNumFaces; i++)
+    {
+        aiFace& face =
+            mesh->mFaces[i];
+
+        for (UINT j = 0;
+            j < face.mNumIndices;
+            j++)
+        {
+            result.Index.push_back(
+                face.mIndices[j]
+            );
+        }
+    }
+    return result;
 }
 
 //制作関数用メモ
