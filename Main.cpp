@@ -20,6 +20,10 @@
 #include <cmath>
 #include <DirectXMath.h>
 
+#include "Core.h"
+#include "Renderer.h"
+#include "Graphics.h"
+
 #pragma comment(lib,"d3d12.lib")
 #pragma comment(lib,"dxgi.lib")
 #pragma comment(lib,"d3dcompiler.lib")
@@ -31,6 +35,7 @@ using namespace Microsoft::WRL;
 // 設定
 // ==========================================================
 
+//ウィンドウサイズ______________
 const int WIDTH = 1280;
 const int HEIGHT = 720;
 const int FRAME_COUNT = 2;
@@ -39,62 +44,16 @@ const int FRAME_COUNT = 2;
 // 構造体
 // ==========================================================
 
-//ポリゴン用________
-struct Vertex
-{
-    float x, y, z;
-    float u, v;
-};
-struct PolygonState
-{
-    float x, y, z;
-    float r, g, b, a;
-};
-struct TextureData
-{
-    ComPtr<ID3D12Resource> resource;
 
-    D3D12_GPU_DESCRIPTOR_HANDLE gpuHandle{};
-
-    UINT width = 0;
-    UINT height = 0;
-};
-struct TextureSettingsData
-{
-    const char* textureName;
-    TextureData textureData;
-};
-
-//モデル用___________
-struct ModelVertex
-{
-    DirectX::XMFLOAT3 Position;
-    DirectX::XMFLOAT3 Normal;
-    DirectX::XMFLOAT2 UV;
-};
-class Mesh
-{
-public:
-    std::vector<ModelVertex> Vertex;
-    std::vector<unsigned int> Index;
-};
-class Model
-{
-public:
-    std::vector<Mesh> ModelMesh;
-};
-class ModelLoader
-{
-public:
-    static bool LoadFBX(
-        const std::string& filename,
-        Model& model);
-};
+//===========================================================
+// プロトタイプ宣言
+//===========================================================
+//モデルノード読み取り_______
 static void ProcessNode(
     aiNode* node,
     const aiScene* scene,
     Model& model);
-
+//モデルメッシュ読み取り_____
 static Mesh ProcessMesh(
     aiMesh* mesh,
     const aiScene* scene);
@@ -104,47 +63,41 @@ static Mesh ProcessMesh(
 // ==========================================================
 
 HWND g_hwnd = nullptr;
+HANDLE fenceEvent = nullptr;
 
 ComPtr<ID3D12Device> device;
 ComPtr<IDXGISwapChain3> swapChain;
 ComPtr<ID3D12CommandQueue> commandQueue;
-
 ComPtr<ID3D12DescriptorHeap> rtvHeap;
 ComPtr<ID3D12DescriptorHeap> srvHeap;
-
 ComPtr<ID3D12Resource> renderTargets[FRAME_COUNT];
-
 ComPtr<ID3D12CommandAllocator> commandAllocator;
 ComPtr<ID3D12GraphicsCommandList> commandList;
-
 ComPtr<ID3D12Fence> fence;
 
-HANDLE fenceEvent = nullptr;
-
-UINT64 fenceValue = 0;
-
-UINT frameIndex = 0;
-
-UINT rtvDescriptorSize = 0;
-UINT srvDescriptorSize = 0;
-
-ComPtr<ID3D12RootSignature> rootSignature;
 ComPtr<ID3D12PipelineState> pipelineState;
-
 ComPtr<ID3D12Resource> vertexBuffer;
 
 D3D12_VERTEX_BUFFER_VIEW vbView{};
 
+UINT64 fenceValue = 0;
+UINT frameIndex = 0;
+UINT rtvDescriptorSize = 0;
+UINT srvDescriptorSize = 0;
 UINT vertexCount = 0;
 
-std::unordered_map<std::string, TextureData> g_textures;
+std::unordered_map<std::string, TextureData> g_texture;
+std::unordered_map<std::string, Model> g_model;
+std::vector<TextureSettingName> g_vTexSetData;
 
-std::vector<TextureSettingsData> g_vTexSetData;
+ClassWindow * CWindow = new ClassWindow();
+ClassDirectXManager* CDM = new ClassDirectXManager();
 
 // ==========================================================
 // ウィンドウ
 // ==========================================================
 
+//コールバック
 LRESULT CALLBACK WindowProc(
     HWND hwnd,
     UINT msg,
@@ -162,13 +115,13 @@ LRESULT CALLBACK WindowProc(
     }
 
     return DefWindowProc(
-        hwnd,
+        CWindow->GetHWND(),
         msg,
         wparam,
         lparam
     );
 }
-
+//ウィンドウ作成＆描画
 void CreateWindowApp(HINSTANCE hInstance)
 {
     WNDCLASS wc = {};
@@ -178,58 +131,14 @@ void CreateWindowApp(HINSTANCE hInstance)
 
     RegisterClass(&wc);
 
-    g_hwnd =
-        CreateWindowEx(
-            0,
-            wc.lpszClassName,
-            "DX12 Texture Sample",
-            WS_OVERLAPPEDWINDOW,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            WIDTH,
-            HEIGHT,
-            nullptr,
-            nullptr,
-            hInstance,
-            nullptr
-        );
-
-    ShowWindow(
-        g_hwnd,
-        SW_SHOW
+    CWindow->Initialize
+    (
+        hInstance,
+        wc,
+        WIDTH,
+        HEIGHT,
+        "DX12 Sample"
     );
-}
-
-// ==========================================================
-// GPU同期
-// ==========================================================
-
-void WaitForGPU()
-{
-    UINT64 currentFence = fenceValue;
-
-    commandQueue->Signal(
-        fence.Get(),
-        currentFence
-    );
-
-    fenceValue++;
-
-    if (fence->GetCompletedValue() < currentFence)
-    {
-        fence->SetEventOnCompletion(
-            currentFence,
-            fenceEvent
-        );
-
-        WaitForSingleObject(
-            fenceEvent,
-            INFINITE
-        );
-    }
-
-    frameIndex =
-        swapChain->GetCurrentBackBufferIndex();
 }
 
 // ==========================================================
@@ -619,7 +528,7 @@ bool LoadTexture(
         lists
     );
 
-    WaitForGPU();
+    CDM->WaitForGPU();
 
     // ======================================================
     // SRV
@@ -651,7 +560,7 @@ bool LoadTexture(
     texData.gpuHandle =
         srvHeap->GetGPUDescriptorHandleForHeapStart();
 
-    g_textures[name] = texData;
+    g_texture[name] = texData;
 
     converter->Release();
     frame->Release();
@@ -998,13 +907,10 @@ void Render()
     // Texture
     // ======================================================
 
-    for(int i = 0; i < g_textures.size(); i++)
-    {
-        commandList->SetGraphicsRootDescriptorTable(
-            0,
-            g_textures["test"].gpuHandle
-        );
-    }
+    commandList->SetGraphicsRootDescriptorTable(
+        0,
+        g_texture["test"].gpuHandle
+    );
 
     // ======================================================
     // Barrier
@@ -1144,7 +1050,7 @@ void Render()
         0
     );
 
-    WaitForGPU();
+    CDM->WaitForGPU();
 }
 
 // ==========================================================
@@ -1186,7 +1092,7 @@ int WINAPI WinMain(
         }
     }
 
-    WaitForGPU();
+    CDM->WaitForGPU();
 
     CloseHandle(fenceEvent);
 

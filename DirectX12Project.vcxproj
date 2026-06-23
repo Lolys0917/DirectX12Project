@@ -131,13 +131,19 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="DirectX12.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="ObjectDraw.cpp" />
+    <ClCompile Include="Polygon.cpp" />
     <ClCompile Include="UtilManager.cpp" />
+    <ClCompile Include="Window.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Core.h" />
     <ClInclude Include="d3dx12.h" />
+    <ClInclude Include="Graphics.h" />
     <ClInclude Include="ObjectDraw.h" />
+    <ClInclude Include="Renderer.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
