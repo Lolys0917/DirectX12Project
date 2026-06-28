@@ -621,18 +621,21 @@ bool LoadTexture(
 // ==========================================================
 // í∏ì_ê∂ê¨
 // ==========================================================
-
 std::vector<Vertex> CreateQuad()
 {
+    float posx = 0.75f;
+    float posy = 0.75f;
+    float size = 0.2f;
+
     return
     {
-        {-0.5f, -0.5f, 0.0f, 0.0f, 1.0f},
-        {-0.5f,  0.5f, 0.0f, 0.0f, 0.0f},
-        { 0.5f, -0.5f, 0.0f, 1.0f, 1.0f},
+        {-size + posx, -size + posy, 0.0f, 0.0f, 1.0f},
+        {-size + posx,  size + posy, 0.0f, 0.0f, 0.0f},
+        { size + posx, -size + posy, 0.0f, 1.0f, 1.0f},
 
-        { 0.5f, -0.5f, 0.0f, 1.0f, 1.0f},
-        {-0.5f,  0.5f, 0.0f, 0.0f, 0.0f},
-        { 0.5f,  0.5f, 0.0f, 1.0f, 0.0f}
+        { size + posx, -size + posy, 0.0f, 1.0f, 1.0f},
+        {-size + posx,  size + posy, 0.0f, 0.0f, 0.0f},
+        { size + posx,  size + posy, 0.0f, 1.0f, 0.0f}
     };
 }
 
@@ -985,7 +988,6 @@ void Render()
         frameIndex,
         rtvDescriptorSize
     );
-
     commandList->OMSetRenderTargets(
         1,
         &rtvHandle,
