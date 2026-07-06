@@ -1,68 +1,40 @@
 #pragma once
-
-#include <d3d12.h>
 #include <string>
 #include <vector>
-#include <wrl.h>
 
-class Core;
+#include "Object.h"
 
-enum class ModelFileType
+namespace Engine
 {
-    VertexList,
-    Obj,
-    Fbx,
-};
+    struct ModelMesh
+    {
+        VertexMesh mesh;
+        Material material;
 
-struct ModelLoadDesc
-{
-    ModelFileType type = ModelFileType::Obj;
-    std::wstring modelPath;
-    std::wstring texturePath;
-    float scale = 1.0f;
-    bool normalize = true;
-    bool flipTextureV = true;
-};
+        std::wstring diffuseTexturePath;
+        std::wstring normalTexturePath;
+        std::wstring specularTexturePath;
+    };
 
-struct ModelVertex
-{
-    float x, y, z;
-    float u, v;
-};
+    class Model : public Object
+    {
+    public:
+        Model();
+        virtual ~Model();
 
-class Model
-{
-public:
-    bool Initialize(Core& core, const std::vector<ModelVertex>& vertices, const std::wstring& texturePath);
+        virtual bool Load(const std::wstring& filePath) = 0;
 
-    bool Initialize(
-        Core& core,
-        const std::wstring& modelPath,
-        const std::wstring& texturePath,
-        float scale = 1.0f,
-        ModelFileType type = ModelFileType::Obj
-    );
+        virtual void CreateGPUResource(DirectX12& dx12) override;
+        virtual void Update(float deltaTime) override;
+        virtual void Draw(DirectX12& dx12) override;
 
-    bool Initialize(Core& core, const ModelLoadDesc& desc);
+        const std::vector<ModelMesh>& GetMeshes() const;
 
-    void Draw(Core& core) const;
+    protected:
+        virtual void BuildMesh() override;
 
-private:
-    bool LoadVertices(const ModelLoadDesc& desc, std::vector<ModelVertex>& vertices);
-    bool LoadObj(const ModelLoadDesc& desc, std::vector<ModelVertex>& vertices);
-    bool LoadFbx(const ModelLoadDesc& desc, std::vector<ModelVertex>& vertices);
-
-    bool LoadTexture(Core& core, const std::wstring& filePath);
-    bool CreateVertexBuffer(Core& core, const std::vector<ModelVertex>& vertices);
-
-private:
-    Microsoft::WRL::ComPtr<ID3D12Resource> texture;
-    D3D12_GPU_DESCRIPTOR_HANDLE textureHandle{};
-
-    UINT textureWidth = 0;
-    UINT textureHeight = 0;
-
-    Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer;
-    D3D12_VERTEX_BUFFER_VIEW vertexBufferView{};
-    UINT vertexCount = 0;
-};
+    protected:
+        std::wstring m_FilePath;
+        std::vector<ModelMesh> m_Meshes;
+    };
+}

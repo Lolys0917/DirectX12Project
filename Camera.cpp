@@ -1,63 +1,139 @@
 #include "Camera.h"
+#include "DirectX12.h"
 
-#include "Core.h"
-#include "d3dx12.h"
+#include <Windows.h>
 
-bool Camera::Initialize(Core& core)
+namespace Engine
 {
-    const UINT size = (sizeof(CameraConstantBuffer) + 255) & ~255;
-
-    CD3DX12_HEAP_PROPERTIES heap(D3D12_HEAP_TYPE_UPLOAD);
-    auto desc = CD3DX12_RESOURCE_DESC::Buffer(size);
-
-    HRESULT hr = core.GetDevice()->CreateCommittedResource(
-        &heap,
-        D3D12_HEAP_FLAG_NONE,
-        &desc,
-        D3D12_RESOURCE_STATE_GENERIC_READ,
-        nullptr,
-        IID_PPV_ARGS(&constantBuffer)
-    );
-    if (FAILED(hr)) return false;
-
-    hr = constantBuffer->Map(0, nullptr, reinterpret_cast<void**>(&mappedData));
-    if (FAILED(hr)) return false;
-
-    UpdateCamera(
-        DirectX::XMVectorSet(eye.x, eye.y, eye.z, 1.0f),
-        DirectX::XMVectorSet(target.x, target.y, target.z, 1.0f)
-    );
-
-    return true;
-}
-
-void Camera::UpdateCamera(DirectX::XMVECTOR pos, DirectX::XMVECTOR focus)
-{
-    DirectX::XMStoreFloat3(&eye, pos);
-    DirectX::XMStoreFloat3(&target, focus);
-
-    DirectX::XMMATRIX view = DirectX::XMMatrixLookAtLH(
-        DirectX::XMLoadFloat3(&eye),
-        DirectX::XMLoadFloat3(&target),
-        DirectX::XMLoadFloat3(&up)
-    );
-
-    DirectX::XMMATRIX proj = DirectX::XMMatrixPerspectiveFovLH(
-        DirectX::XM_PIDIV4,
-        static_cast<float>(Core::WIDTH) / static_cast<float>(Core::HEIGHT),
-        0.1f,
-        100.0f
-    );
-
-    DirectX::XMStoreFloat4x4(&data.viewProj, view * proj);
-
-    if (mappedData)
+    Camera::Camera()
+        : m_Position(0.0f, 6.0f, -10.0f)
+        , m_Target(0.0f, 0.0f, 0.0f)
+        , m_Up(0.0f, 1.0f, 0.0f)
+        , m_Aspect(16.0f / 9.0f)
+        , m_MoveSpeed(5.0f)
     {
-        *mappedData = data;
     }
-}
 
-D3D12_GPU_VIRTUAL_ADDRESS Camera::GetGPUVirtualAddress() const
-{
-    return constantBuffer ? constantBuffer->GetGPUVirtualAddress() : 0;
+    void Camera::Initialize(float width, float height)
+    {
+        if (height <= 0.0f)
+        {
+            height = 1.0f;
+        }
+
+        m_Aspect = width / height;
+    }
+
+    void Camera::Update(float deltaTime)
+    {
+        const float move = m_MoveSpeed * deltaTime;
+
+        if (GetAsyncKeyState(VK_LEFT) & 0x8000)
+        {
+            m_Position.x -= move;
+            //m_Target.x -= move;
+        }
+
+        if (GetAsyncKeyState(VK_RIGHT) & 0x8000)
+        {
+            m_Position.x += move;
+            //m_Target.x += move;
+        }
+
+        if (GetAsyncKeyState(VK_UP) & 0x8000)
+        {
+            m_Position.z += move;
+            //m_Target.z += move;
+        }
+
+        if (GetAsyncKeyState(VK_DOWN) & 0x8000)
+        {
+            m_Position.z -= move;
+            //m_Target.z -= move;
+        }
+    }
+
+    bool Camera::CreateRenderTexture(
+        DirectX12& dx12,
+        uint32_t width,
+        uint32_t height
+    )
+    {
+        m_RenderTexture =
+            std::make_unique<RenderTexture>();
+
+        return m_RenderTexture->Initialize(
+            dx12,
+            width,
+            height,
+            dx12.GetBackBufferFormat()
+        );
+    }
+
+    void Camera::BeginRender(
+        DirectX12& dx12,
+        D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle,
+        const float clearColor[4]
+    )
+    {
+        if (!m_RenderTexture)
+            return;
+
+        m_RenderTexture->Begin(
+            dx12,
+            dsvHandle,
+            clearColor
+        );
+    }
+
+    void Camera::EndRender(
+        DirectX12& dx12
+    )
+    {
+        if (!m_RenderTexture)
+            return;
+
+        m_RenderTexture->End(dx12);
+    }
+
+    RenderTexture* Camera::GetRenderTexture()
+    {
+        return m_RenderTexture.get();
+    }
+
+    const RenderTexture* Camera::GetRenderTexture() const
+    {
+        return m_RenderTexture.get();
+    }
+
+    DirectX::XMMATRIX Camera::GetViewMatrix() const
+    {
+        using namespace DirectX;
+
+        return XMMatrixLookAtLH(
+            XMLoadFloat3(&m_Position),
+            XMLoadFloat3(&m_Target),
+            XMLoadFloat3(&m_Up)
+        );
+    }
+
+    DirectX::XMMATRIX Camera::GetProjectionMatrix() const
+    {
+        return DirectX::XMMatrixPerspectiveFovLH(
+            DirectX::XMConvertToRadians(45.0f),
+            m_Aspect,
+            0.1f,
+            1000.0f
+        );
+    }
+
+    DirectX::XMMATRIX Camera::GetViewProjectionMatrix() const
+    {
+        return GetViewMatrix() * GetProjectionMatrix();
+    }
+
+    const DirectX::XMFLOAT3& Camera::GetPosition() const
+    {
+        return m_Position;
+    }
 }

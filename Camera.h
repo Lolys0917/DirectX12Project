@@ -1,29 +1,54 @@
 #pragma once
 
-#include <d3d12.h>
 #include <DirectXMath.h>
-#include <wrl.h>
+#include <memory>
 
-class Core;
+#include "RenderTexture.h"
 
-struct CameraConstantBuffer
+namespace Engine
 {
-    DirectX::XMFLOAT4X4 viewProj;
-};
+    class Camera
+    {
+    public:
+        Camera();
 
-class Camera
-{
-public:
-    bool Initialize(Core& core);
-    void UpdateCamera(DirectX::XMVECTOR pos, DirectX::XMVECTOR focus);
-    D3D12_GPU_VIRTUAL_ADDRESS GetGPUVirtualAddress() const;
+        void Initialize(float width, float height);
+        void Update(float deltaTime);
 
-private:
-    DirectX::XMFLOAT3 eye = { 0.0f, 0.0f, -5.0f };
-    DirectX::XMFLOAT3 target = { 0.0f, 0.0f, 0.0f };
-    DirectX::XMFLOAT3 up = { 0.0f, 1.0f, 0.0f };
+        DirectX::XMMATRIX GetViewMatrix() const;
+        DirectX::XMMATRIX GetProjectionMatrix() const;
+        DirectX::XMMATRIX GetViewProjectionMatrix() const;
 
-    CameraConstantBuffer data = {};
-    CameraConstantBuffer* mappedData = nullptr;
-    Microsoft::WRL::ComPtr<ID3D12Resource> constantBuffer;
-};
+        const DirectX::XMFLOAT3& GetPosition() const;
+
+        //RenderTexture
+        bool CreateRenderTexture(
+            DirectX12& dx12,
+            uint32_t width,
+            uint32_t height
+        );
+
+        void BeginRender(
+            DirectX12& dx12,
+            D3D12_CPU_DESCRIPTOR_HANDLE dsvHandle,
+            const float clearColor[4]
+        );
+
+        void EndRender(
+            DirectX12& dx12
+        );
+
+        RenderTexture* GetRenderTexture();
+        const RenderTexture* GetRenderTexture() const;
+
+    private:
+        std::unique_ptr<RenderTexture> m_RenderTexture;
+
+        DirectX::XMFLOAT3 m_Position;
+        DirectX::XMFLOAT3 m_Target;
+        DirectX::XMFLOAT3 m_Up;
+
+        float m_Aspect;
+        float m_MoveSpeed;
+    };
+}

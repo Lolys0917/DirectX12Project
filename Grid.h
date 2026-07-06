@@ -1,30 +1,61 @@
 #pragma once
 
-#include <d3d12.h>
-#include <wrl.h>
 #include <vector>
+#include <wrl.h>
+#include <d3d12.h>
+#include <DirectXMath.h>
 
-class Core;
-
-struct GridVertex
+namespace Engine
 {
-    float x, y, z;
-    float r, g, b, a;
-};
+    class DirectX12;
+    class Camera;
 
-class Grid
-{
-public:
-    bool Initialize(Core& core, int halfCount, float interval);
-    void Draw(Core& core) const;
+    struct GridVertex
+    {
+        DirectX::XMFLOAT3 position;
+        DirectX::XMFLOAT4 color;
+    };
 
-private:
-    bool CreatePipeline(Core& core);
-    bool CreateVertexBuffer(Core& core, const std::vector<GridVertex>& vertices);
+    struct GridConstantBuffer
+    {
+        DirectX::XMFLOAT4X4 worldViewProjection;
+    };
 
-    Microsoft::WRL::ComPtr<ID3D12RootSignature> rootSignature_;
-    Microsoft::WRL::ComPtr<ID3D12PipelineState> pipelineState_;
-    Microsoft::WRL::ComPtr<ID3D12Resource> vertexBuffer_;
-    D3D12_VERTEX_BUFFER_VIEW vertexBufferView_{};
-    UINT vertexCount_ = 0;
-};
+    class Grid
+    {
+    public:
+        Grid();
+        ~Grid();
+
+        Grid(const Grid&) = delete;
+        Grid& operator=(const Grid&) = delete;
+
+        void SetCamera(Camera* camera);
+
+        bool Initialize(DirectX12& dx12);
+        void Update(float deltaTime);
+        void Draw(DirectX12& dx12);
+
+    private:
+        void BuildGrid();
+
+        bool CreateRootSignature(DirectX12& dx12);
+        bool CreatePipelineState(DirectX12& dx12);
+        bool CreateVertexBuffer(DirectX12& dx12);
+        bool CreateConstantBuffer(DirectX12& dx12);
+
+    private:
+        Camera* m_Camera;
+
+        std::vector<GridVertex> m_Vertices;
+
+        Microsoft::WRL::ComPtr<ID3D12RootSignature> m_RootSignature;
+        Microsoft::WRL::ComPtr<ID3D12PipelineState> m_PipelineState;
+
+        Microsoft::WRL::ComPtr<ID3D12Resource> m_VertexBuffer;
+        D3D12_VERTEX_BUFFER_VIEW m_VertexBufferView;
+
+        Microsoft::WRL::ComPtr<ID3D12Resource> m_ConstantBuffer;
+        GridConstantBuffer* m_MappedConstantBuffer;
+    };
+}

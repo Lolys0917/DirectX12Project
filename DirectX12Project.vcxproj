@@ -129,22 +129,39 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Camera.cpp" />
-    <ClCompile Include="Core.cpp" />
-    <ClCompile Include="Grid.cpp" />
-    <ClCompile Include="Main.cpp" />
-    <ClCompile Include="Model.cpp" />
-    <ClCompile Include="ObjectDraw.cpp" />
-    <ClCompile Include="Polygon.cpp" />
+    <ClInclude Include="Box.h" />
+    <ClInclude Include="Camera.h" />
+    <ClInclude Include="d3dx12.h" />
+    <ClInclude Include="DirectX12.h" />
+    <ClInclude Include="FBXModel.h" />
+    <ClInclude Include="GameApp.h" />
+    <ClInclude Include="GraphicBase.h" />
+    <ClInclude Include="Grid.h" />
+    <ClInclude Include="IRenderable.h" />
+    <ClInclude Include="Model.h" />
+    <ClInclude Include="Object.h" />
+    <ClInclude Include="OBJModel.h" />
+    <ClInclude Include="Polygon.h" />
+    <ClInclude Include="RenderTexture.h" />
+    <ClInclude Include="Sphere.h" />
+    <ClInclude Include="Texture2D.h" />
+    <ClInclude Include="Transform.h" />
+    <ClInclude Include="Vertex.h" />
+    <ClInclude Include="VertexMesh.h" />
+    <ClInclude Include="WinApp.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Camera.h" />
-    <ClInclude Include="Core.h" />
-    <ClInclude Include="d3dx12.h" />
-    <ClInclude Include="Grid.h" />
-    <ClInclude Include="Model.h" />
-    <ClInclude Include="ObjectDraw.h" />
-    <ClInclude Include="Polygon.h" />
+    <ClCompile Include="Camera.cpp" />
+    <ClCompile Include="DirectX12.cpp" />
+    <ClCompile Include="GameApp.cpp" />
+    <ClCompile Include="GraphicBase.cpp" />
+    <ClCompile Include="Grid.cpp" />
+    <ClCompile Include="OBJModel.cpp" />
+    <ClCompile Include="RenderTexture.cpp" />
+    <ClCompile Include="Texture2D.cpp" />
+    <ClCompile Include="VertexMesh.cpp" />
+    <ClCompile Include="WinApp.cpp" />
+    <ClCompile Include="WinMain.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
