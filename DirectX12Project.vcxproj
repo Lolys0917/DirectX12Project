@@ -140,9 +140,11 @@
     <ClInclude Include="IRenderable.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="Object.h" />
+    <ClInclude Include="ObjectManager.h" />
     <ClInclude Include="OBJModel.h" />
     <ClInclude Include="Polygon.h" />
     <ClInclude Include="RenderTexture.h" />
+    <ClInclude Include="Scene.h" />
     <ClInclude Include="Sphere.h" />
     <ClInclude Include="Texture2D.h" />
     <ClInclude Include="Transform.h" />
