@@ -1,5 +1,6 @@
 #pragma once
 #include <DirectXMath.h>
+#include <unordered_map>
 
 #include "IRenderable.h"
 #include "VertexMesh.h"
@@ -7,6 +8,11 @@
 
 namespace Engine
 {
+    inline int ObjectID;		//統括ID
+    inline std::unordered_map<std::string, int> ObjectTagMap;	//タグ→int
+    inline std::unordered_map<std::string, int> ObjectLayerMap;	//レイヤー→int
+
+
     class Object : public IRenderable
     {
     public:
