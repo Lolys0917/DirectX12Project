@@ -1,42 +1,90 @@
+//|| GameApp.h ||:::::::::::::::::::::::::::::::
+//||
+//||  概要 :::::::::::::::::::::::::::::::::::::
+//||
+//||  GraphicBaseとSceneManagerを接続し、Engineの初期化、更新、描画及び
+//||  描画領域変更を管理するApplicationクラスを定義する
+//||
+//||  更新内容 :::::::::::::::::::::::::::::::::
+//||
+//||  2026_07_13  v2.20  編集: MainScene生成と状態設定をSceneManagerへ集約
+//||  2026_07_13  v2.00  編集: 直接Object所有をSceneManager所有へ変更
+//||                         ViewScene RenderTexture表示とResizeを追加
+//||  2026_06_01  v1.00  新規作成
+//||
+
 #pragma once
 
 #include <Windows.h>
 #include <cstdint>
 
 #include "GraphicBase.h"
-#include "Camera.h"
-#include "Grid.h"
-#include "OBJModel.h"
+#include "SceneManager.h"
 
 namespace Engine
 {
     class GameApp final
     {
     public:
+        // 未初期化のApplicationを作成する
         GameApp();
+
+        // Sceneを先に終了してから描画基盤を破棄する
         ~GameApp();
 
+        //Sceneと描画基盤の二重所有を防ぐためCopy構築を禁止する
+        //引数: コピー元Application
+        GameApp(const GameApp&) = delete;
+
+        //Sceneと描画基盤の二重所有を防ぐためCopy代入を禁止する
+        //引数: コピー元Application
+        //戻り値: 代入先Applicationへの参照
+        GameApp& operator=(const GameApp&) = delete;
+
+        //内部参照の不整合を防ぐためMove構築を禁止する
+        //引数: 移動元Application
+        GameApp(GameApp&&) = delete;
+
+        //内部参照の不整合を防ぐためMove代入を禁止する
+        //引数: 移動元Application
+        //戻り値: 代入先Applicationへの参照
+        GameApp& operator=(GameApp&&) = delete;
+
+        // 描画基盤を初期化しMainSceneの生成と状態設定をSceneManagerへ依頼する
+        // hwnd: DirectX 12 SwapChainの表示対象Window Handle
+        // width: 初期描画領域の横幅
+        // height: 初期描画領域の縦幅
+        // 戻り値: 全初期化に成功した場合はtrue
         bool Initialize(
             HWND hwnd,
             uint32_t width,
             uint32_t height
         );
 
+        // Scene GPU Resourceを解放してからDirectX 12描画基盤を終了する
         void Finalize();
 
+        // 全Active Sceneを更新する
+        // deltaTime: 前Frameからの経過秒数
         void Update(float deltaTime);
+
+        // 全Active SceneをRenderTextureへ描画しViewSceneをBackBufferへ転送する
         void Draw();
 
+        // BackBufferと全SceneのCamera RenderTextureを同寸法へ変更する
+        // width: 新しい描画領域の横幅
+        // height: 新しい描画領域の縦幅
+        // 戻り値: 全ResourceのResizeに成功した場合はtrue
+        bool Resize(uint32_t width, uint32_t height);
+
+        // Applicationが所有するSceneManagerを取得する
+        // 戻り値: SceneManagerへの参照
+        SceneManager& GetSceneManager();
+        const SceneManager& GetSceneManager() const;
+
     private:
-        HWND m_HWND;
-
-        GraphicBase m_GraphicBase;
-
-        //�I�u�W�F�N�g�ϐ�
-        Camera m_Camera;
-        Grid m_Grid;
-        OBJModel m_OBJModel;
-
-        bool m_IsInitialized;
+        GraphicBase Graphics; // DirectX 12描画基盤の所有者
+        SceneManager Scenes; // 全SceneとViewScene状態の所有者
+        bool Initialized; // Application全体の初期化完了状態
     };
 }

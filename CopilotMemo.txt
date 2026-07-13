@@ -1,0 +1,317 @@
+================================================================================
+DirectX12Project - WinMain処理フロー分析
+================================================================================
+
+【全体構造】
+WinMain関数は以下の3つのフェーズで構成されています：
+1. 初期化フェーズ
+2. メインループフェーズ
+3. クリーンアップフェーズ
+
+================================================================================
+【フェーズ1: 初期化フェーズ】
+================================================================================
+
+┌─ WinMain開始
+│
+├─ 1.1: 定数設定
+│   └─ WindowWidth = 1280
+│   └─ WindowHeight = 720
+│
+├─ 1.2: MessageLogの初期化
+│   └─ MessageLog::GetInstance()で共有ログマネージャを取得
+│   └─ 常設ログ1: "DirectX 12 Component Engine | Permanent logs..."
+│   └─ 常設ログ2: "ViewScene | The selected scene and every camera..."
+│
+├─ 1.3: DPI Awareness設定
+│   └─ SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)を呼び出し
+│   ├─ 成功 → 続行
+│   └─ 失敗（ERROR_ACCESS_DENIED以外） 
+│       └─ ログ追加: "[Warning] WinMain | Per-monitor DPI awareness could not be enabled."
+│
+├─ 1.4: COM初期化
+│   └─ CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)を呼び出し
+│   ├─ S_OK または S_FALSE → MustUninitializeCom = true（この関数がCOM解放を担当）
+│   ├─ その他 → MustUninitializeCom = false
+│   │
+│   ├─【分岐A: COM初期化失敗時】
+│   │   └─ ログ追加: "[Warning] WinMain | COM initialization failed; WIC image loading may be unavailable."
+│   │   └─ 処理は継続（WIC画像読み込みが利用不可になる可能性）
+│   │
+│   └─【分岐B: COM初期化成功時】
+│       └─ 処理続行
+│
+├─ 1.5: Editor Window作成
+│   └─ Engine::WinAppのインスタンス作成
+│   └─ Window.Create(L"DirectX 12 Component Engine", 1280, 720)を呼び出し
+│   │
+│   ├─【分岐C: Window作成失敗時】
+│   │   ├─ 常設ログ追加: "[Critical] WinMain | Editor Window creation failed."
+│   │   ├─ MessageBox表示: "Editor Windowの作成に失敗しました。"
+│   │   ├─ COMの処理
+│   │   │   └─ MustUninitializeCom = true → CoUninitialize()を呼び出し
+│   │   │   └─ MustUninitializeCom = false → 何もしない
+│   │   ├─ return -1で終了
+│   │   └─ (クリーンアップフェーズへ進まない)
+│   │
+│   └─【分岐D: Window作成成功時】
+│       ├─ ログ追加: "[Info] WinMain | Editor Window created."
+│       └─ 処理続行
+│
+├─ 1.6: UI設定
+│   └─ Engine::WindowsUISettings UISettingsのインスタンス作成
+│   └─ UISettings.TexturePath = L"c_1576721479650-1-2.jpg"
+│   └─ Window.SetUISettings(UISettings)を呼び出し
+│
+├─ 1.7: GameApp初期化
+│   └─ Engine::GameAppのインスタンス作成
+│   └─ Application.Initialize(Window.GetRenderHwnd(), Window.GetRenderWidth(), Window.GetRenderHeight())を呼び出し
+│   │
+│   ├─【分岐E: GameApp初期化失敗時】
+│   │   ├─ 常設ログ追加: "[Critical] WinMain | DirectX 12 or DefaultScene initialization failed."
+│   │   ├─ MessageBox表示: "DirectX 12または既定Sceneの初期化に失敗しました。"
+│   │   ├─ Window.Destroy()を呼び出し
+│   │   ├─ COMの処理
+│   │   │   └─ MustUninitializeCom = true → CoUninitialize()を呼び出し
+│   │   │   └─ MustUninitializeCom = false → 何もしない
+│   │   ├─ return -1で終了
+│   │   └─ (クリーンアップフェーズへ進まない)
+│   │
+│   └─【分岐F: GameApp初期化成功時】
+│       └─ 処理続行
+│
+├─ 1.8: FrameRateController初期化
+│   └─ Engine::FrameRateControllerのインスタンス作成
+│   └─ FrameRate.SetTargetFrameRate(Window.GetTargetFrameRate())を呼び出し
+│
+├─ 1.9: 変数初期化
+│   ├─ NeedsDraw = true（最初は描画が必要）
+│   ├─ DisplayedLogRevision = std::numeric_limits<std::uint64_t>::max()（最初はログ表示を更新）
+│   └─ RefreshLogDisplay(Window, DisplayedLogRevision)を呼び出し
+│
+└─ 初期化フェーズ完了 → メインループへ
+
+
+================================================================================
+【フェーズ2: メインループフェーズ】
+================================================================================
+
+while (Window.ProcessMessage())  // ← Windowメッセージ処理ループ
+{
+    ┌─ ループの開始
+    │
+    ├─ 2.1: Clear Logsボタンの処理
+    │   └─ Window.ConsumeClearLogs()を呼び出し
+    │   ├─【分岐G: Clear Logsが要求された場合】
+    │   │   ├─ Log.ClearLogs()を呼び出し（常設ログ以外を削除）
+    │   │   └─ ログ追加: "[Info] MessageLog | Clear Logs removed all non-permanent entries."
+    │   └─【分岐H: Clear Logsが要求されなかった場合】
+    │       └─ 何もしない
+    │
+    ├─ 2.2: Startボタンの処理
+    │   └─ Window.ConsumeStart()を呼び出し
+    │   ├─【分岐I: Startが要求された場合】
+    │   │   ├─ FrameRate.Start()を呼び出し（再生開始）
+    │   │   └─ ログ追加: "[Info] Playback | Start requested."
+    │   └─【分岐J: Startが要求されなかった場合】
+    │       └─ 何もしない
+    │
+    ├─ 2.3: Stopボタンの処理
+    │   └─ Window.ConsumeStop()を呼び出し
+    │   ├─【分岐K: Stopが要求された場合】
+    │   │   ├─ FrameRate.Stop()を呼び出し（再生停止）
+    │   │   └─ ログ追加: "[Info] Playback | Stop requested."
+    │   └─【分岐L: Stopが要求されなかった場合】
+    │       └─ 何もしない
+    │
+    ├─ 2.4: Tickボタンの処理
+    │   └─ Window.ConsumeTick()を呼び出し
+    │   ├─【分岐M: Tickが要求された場合】
+    │   │   ├─ FrameRate.RequestTick()を呼び出し（1フレーム進める）
+    │   │   └─ ログ追加: "[Info] Playback | Single-frame Tick requested."
+    │   └─【分岐N: Tickが要求されなかった場合】
+    │       └─ 何もしない
+    │
+    ├─ 2.5: フレームレート変更の処理
+    │   └─ RequestedFrameRate = Window.GetTargetFrameRate()（EditまたはTrackbarから取得）
+    │   ├─【分岐O: フレームレートが変更された場合】
+    │   │   ├─ FrameRate.SetTargetFrameRate(RequestedFrameRate)を呼び出し
+    │   │   ├─ FrameRateMessageを作成（例: "[Info] Playback | Target frame rate changed to 60 FPS."）
+    │   │   └─ ログ追加: FrameRateMessage
+    │   └─【分岐P: フレームレートが変更されなかった場合】
+    │       └─ 何もしない
+    │
+    ├─ 2.6: Resizeイベント処理
+    │   └─ Window.ConsumeResize(RenderSize)を呼び出し
+    │   ├─【分岐Q: Resizeが発生した場合】
+    │   │   └─ Application.Resize(RenderSize.Width, RenderSize.Height)を呼び出し
+    │   │   ├─【分岐Q-1: Resize成功時】
+    │   │   │   ├─ NeedsDraw = true（再描画が必要）
+    │   │   │   └─ 処理続行
+    │   │   └─【分岐Q-2: Resize失敗時】
+    │   │       ├─ 常設ログ追加: "[Critical] WinMain | Render viewport Resize failed; execution was stopped."
+    │   │       ├─ MessageBox表示: "描画領域のサイズ変更に失敗しました。"
+    │   │       └─ break（ループを抜ける）→ クリーンアップフェーズへ
+    │   └─【分岐R: Resizeが発生していない場合】
+    │       └─ 何もしない
+    │
+    ├─ 2.7: ゲーム更新（固定タイムステップ）
+    │   └─ FrameRate.TryConsumeStep(DeltaTime)を呼び出し
+    │   ├─【分岐S: 固定更新のタイミングが来た場合（戻り値true）】
+    │   │   ├─ Application.Update(DeltaTime)を呼び出し（ゲームロジック更新）
+    │   │   ├─ NeedsDraw = true（新しい状態を描画する必要がある）
+    │   │   └─ 処理続行
+    │   └─【分岐T: 固定更新のタイミングがまだの場合（戻り値false）】
+    │       └─ 何もしない（前フレームのまま）
+    │
+    ├─ 2.8: 描画処理
+    │   ├─【分岐U: NeedsDrawがtrueの場合】
+    │   │   ├─ Application.Draw()を呼び出し（画面に描画）
+    │   │   └─ NeedsDraw = false（描画済みフラグをリセット）
+    │   └─【分岐V: NeedsDrawがfalseの場合】
+    │       └─ 描画スキップ（前フレームがまだ有効）
+    │
+    ├─ 2.9: ログ表示更新
+    │   └─ RefreshLogDisplay(Window, DisplayedLogRevision)を呼び出し
+    │   ├─【分岐W: ログが更新されている場合】
+    │   │   ├─ MessageLogSnapshotを取得
+    │   │   ├─ 常設ログと通常ログをUTF-16に変換
+    │   │   ├─ Window.UpdateLogMessages(DisplayMessages)を呼び出し
+    │   │   └─ DisplayedLogRevisionを更新
+    │   └─【分岐X: ログが更新されていない場合】
+    │       └─ 何もしない
+    │
+    ├─ 2.10: Windows Message待機
+    │   └─ MsgWaitForMultipleObjectsEx(0, nullptr, FrameRate.GetWaitMilliseconds(), QS_ALLINPUT, MWMO_INPUTAVAILABLE)を呼び出し
+    │   ├─【分岐Y: WAIT_FAILED（エラー）が返された場合】
+    │   │   ├─ 常設ログ追加: "[Critical] WinMain | Waiting for Windows messages failed."
+    │   │   ├─ RefreshLogDisplay(Window, DisplayedLogRevision)を呼び出し
+    │   │   └─ break（ループを抜ける）→ クリーンアップフェーズへ
+    │   └─【分岐Z: WAIT_FAILED以外の場合】
+    │       └─ ループの先頭へ戻る（2.1へ）
+    │
+    └─ ループの終了条件チェック
+        └─ Window.ProcessMessage()がfalseを返した場合（Windowが閉じられた場合）
+            └─ whileループを抜ける → クリーンアップフェーズへ
+
+
+================================================================================
+【フェーズ3: クリーンアップフェーズ】
+================================================================================
+
+┌─ メインループ終了
+│
+├─ 3.1: GameApp終了処理
+│   └─ Application.Finalize()を呼び出し
+│       └─ ゲームアプリケーション内のリソースを解放
+│
+├─ 3.2: Editor Window破棄
+│   └─ Window.Destroy()を呼び出し
+│       └─ Windows UIと関連リソースを破棄
+│
+├─ 3.3: COM解放
+│   └─ MustUninitializeCom = true の場合のみ
+│       └─ CoUninitialize()を呼び出し
+│           └─ WICなどで使用したCOMリソースを解放
+│
+└─ return 0で終了（正常終了）
+
+
+================================================================================
+【分岐フローの詳細マップ】
+================================================================================
+
+【初期化フェーズの分岐ツリー】
+
+WinMain開始
+├─ 1.3 DPI設定
+│  ├─ 分岐A: 失敗 → 警告ログ → 1.4へ
+│  └─ 分岐B: 成功 → 1.4へ
+│
+├─ 1.4 COM初期化
+│  └─ 1.5へ
+│
+├─ 1.5 Window作成
+│  ├─ 分岐C: 失敗 → エラー表示 → return -1で終了
+│  └─ 分岐D: 成功 → ログ出力 → 1.6へ
+│
+├─ 1.6 UI設定
+│  └─ 1.7へ
+│
+└─ 1.7 GameApp初期化
+   ├─ 分岐E: 失敗 → エラー表示 → return -1で終了
+   └─ 分岐F: 成功 → 1.8へ
+
+1.8 FrameRate初期化
+1.9 変数初期化
+→ メインループへ
+
+
+【メインループの優先度】
+
+1フレーム内での処理順序（優先度順）：
+1. UI操作の消費（Clear Logs, Start, Stop, Tick, FPS変更）
+2. Resizeイベント処理 ← 失敗時はループ抜け
+3. ゲーム更新（固定タイムステップ）
+4. 描画処理
+5. ログ表示更新
+6. Windows Message待機
+
+※各分岐は独立しており、複数の分岐が同じフレームで実行される場合もあります
+
+
+================================================================================
+【主要なエラーハンドリングポイント】
+================================================================================
+
+エラーハンドリング一覧：
+
+1. DPI設定失敗 → 警告ログのみ（処理継続）
+2. COM初期化失敗 → 警告ログのみ（処理継続、WIC機能が制限）
+3. Window作成失敗 → クリティカルエラー（即座に終了）
+4. GameApp初期化失敗 → クリティカルエラー（即座に終了）
+5. Resize失敗 → クリティカルエラー（ループ抜け、クリーンアップへ）
+6. Windows Message待機失敗 → クリティカルエラー（ループ抜け、クリーンアップへ）
+
+
+================================================================================
+【リソース管理】
+================================================================================
+
+初期化の順序と破棄の順序（RAII原則）：
+
+初期化：
+1. COM（CoInitializeEx）
+2. Editor Window（WinApp::Create）
+3. GameApp（GameApp::Initialize）
+4. FrameRateController（自動）
+5. MessageLog（GetInstance）
+
+破棄（逆順）：
+1. GameApp（GameApp::Finalize）
+2. Editor Window（WinApp::Destroy）
+3. COM（CoUninitialize）
+※MessageLogはシングルトンなので破棄不要
+
+
+================================================================================
+【フレームレート制御の仕組み】
+================================================================================
+
+FrameRateController（FrameRate）の役割：
+
+- GetWaitMilliseconds()：
+  次の固定更新まで待機する時間（ミリ秒）をMsgWaitForMultipleObjectsExに渡す
+
+- TryConsumeStep(DeltaTime)：
+  固定タイムステップの時間が経過したかチェック
+  ├─ true → DeltaTimeを返し、ゲームを更新
+  └─ false → 時間未経過、ゲーム更新スキップ
+
+- Start() / Stop() / RequestTick()：
+  再生制御コマンドを受け取る
+
+この仕組みにより、物理更新は常に固定タイムステップで実行されます
+
+
+================================================================================

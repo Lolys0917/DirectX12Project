@@ -1,11 +1,35 @@
+//|| OBJModel.cpp ||::::::::::::::::::::::::::::
+//||
+//||  概要 :::::::::::::::::::::::::::::::::::::
+//||
+//||  Wavefront OBJとTextureを描画するModel Componentを実装する
+//||
+//||  更新内容 :::::::::::::::::::::::::::::::::
+//||
+//||  2026_07_13  v2.30  OBJ行解析、描画Resource及びTexture失敗をMessageLogへ記録
+//||  2026_07_13  v2.20  Root Constants、安全なOBJ解析、複製元情報を追加
+//||  2026_07_13  v2.10  C++変数命名と宣言コメントを規則へ統一
+//||  2026_07_13  v2.00  Objectの姿勢とRenderContextを使用するComponentへ変更
+//||  2026_06_01  v1.00  新規作成
+//||
+
 #include "OBJModel.h"
 
 #include "DirectX12.h"
 #include "Camera.h"
+#include "MessageLog.h"
+#include "Object.h"
+#include "RenderContext.h"
 
+#include <charconv>
+#include <cstdio>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <cstring>
 #include <d3dcompiler.h>
 
@@ -15,90 +39,188 @@ namespace Engine
 {
     namespace
     {
-        UINT Align256(UINT size)
-        {
-            return (size + 255) & ~255;
-        }
+        constexpr UINT OBJRootConstantCount = 24; //OBJ描画定数を構成する32bit値数
+        static_assert(sizeof(OBJConstantBuffer) ==
+            sizeof(UINT) * OBJRootConstantCount);
 
         struct OBJIndex
         {
-            int position = 0;
-            int uv = 0;
-            int normal = 0;
+            int Position = 0; //Position配列のOBJ Index
+            int UV = 0; //Texture座標配列のOBJ Index
+            int Normal = 0; //法線配列のOBJ Index
 
+            //二つのOBJ Index組が一致するか判定する
+            //引数: rhs 比較対象
+            //戻り値: 全Indexが一致する場合はtrue
             bool operator==(const OBJIndex& rhs) const
             {
-                return position == rhs.position &&
-                    uv == rhs.uv &&
-                    normal == rhs.normal;
+                return Position == rhs.Position &&
+                    UV == rhs.UV &&
+                    Normal == rhs.Normal;
             }
         };
 
         struct OBJIndexHash
         {
+            //OBJ Index組のHash値を計算する
+            //引数: key Hash対象
+            //戻り値: 三つのIndexから生成したHash値
             size_t operator()(const OBJIndex& key) const
             {
-                size_t h1 = std::hash<int>()(key.position);
-                size_t h2 = std::hash<int>()(key.uv);
-                size_t h3 = std::hash<int>()(key.normal);
+                size_t PositionHash = std::hash<int>()(key.Position); //Position IndexのHash値
+                size_t UVHash = std::hash<int>()(key.UV); //Texture座標IndexのHash値
+                size_t NormalHash = std::hash<int>()(key.Normal); //法線IndexのHash値
 
-                return h1 ^ (h2 << 1) ^ (h3 << 2);
+                return PositionHash ^ (UVHash << 1) ^ (NormalHash << 2);
             }
         };
 
-        std::string ToString(const std::wstring& str)
-        {
-            return std::string(str.begin(), str.end());
-        }
-
-        int ResolveOBJIndex(
-            int index,
-            int count
+        //文字列全体を例外なしで符号付き整数へ変換する
+        //引数: text 変換する文字列、value 変換結果
+        //戻り値: 範囲内の整数へ完全変換できた場合はtrue
+        bool ParseInteger(
+            std::string_view text,
+            int& value
         )
         {
-            if (index > 0)
+            if (text.empty())
             {
-                return index - 1;
+                return false;
             }
 
-            if (index < 0)
+            if (text.front() == '+')
             {
-                return count + index;
+                text.remove_prefix(1);
+
+                if (text.empty() || text.front() == '+' ||
+                    text.front() == '-')
+                {
+                    return false;
+                }
             }
 
-            return -1;
+            int ParsedValue = 0; //from_charsが返す整数
+            const char* Begin = text.data(); //変換対象の先頭
+            const char* End = Begin + text.size(); //変換対象の末尾
+            const std::from_chars_result Result = std::from_chars(
+                Begin,
+                End,
+                ParsedValue
+            ); //例外を送出しない整数変換結果
+
+            if (Result.ec != std::errc() || Result.ptr != End)
+            {
+                return false;
+            }
+
+            value = ParsedValue;
+            return true;
         }
 
-        OBJIndex ParseFaceToken(const std::string& token)
+        //OBJ形式の正負Indexを検証してゼロ始まりIndexへ変換する
+        //引数: index OBJ Index、count 対象配列要素数、required 必須Indexの場合true、resolvedIndex 変換結果
+        //戻り値: 配列範囲内又は省略可能Indexの場合はtrue
+        bool ResolveOBJIndex(
+            int index,
+            std::size_t count,
+            bool required,
+            int& resolvedIndex
+        )
         {
-            OBJIndex result{};
-
-            std::stringstream ss(token);
-            std::string part;
-
-            std::getline(ss, part, '/');
-            if (!part.empty())
+            if (index == 0)
             {
-                result.position = std::stoi(part);
+                resolvedIndex = -1;
+                return !required;
             }
 
-            if (std::getline(ss, part, '/'))
+            if (count == 0 || count >
+                static_cast<std::size_t>((std::numeric_limits<int>::max)()))
             {
-                if (!part.empty())
-                {
-                    result.uv = std::stoi(part);
-                }
+                return false;
             }
 
-            if (std::getline(ss, part, '/'))
+            const std::int64_t ResolvedValue = index > 0
+                ? static_cast<std::int64_t>(index) - 1
+                : static_cast<std::int64_t>(count) +
+                    static_cast<std::int64_t>(index); //正負表記を解決したIndex
+
+            if (ResolvedValue < 0 ||
+                ResolvedValue >= static_cast<std::int64_t>(count))
             {
-                if (!part.empty())
-                {
-                    result.normal = std::stoi(part);
-                }
+                return false;
             }
 
-            return result;
+            resolvedIndex = static_cast<int>(ResolvedValue);
+            return true;
+        }
+
+        //Face要素のPosition/UV/Normal Indexを分解する
+        //引数: token OBJ Faceの一要素、result 分解したOBJ Index組
+        //戻り値: Token全体を有効なIndex表記として解析できた場合はtrue
+        bool ParseFaceToken(
+            const std::string& token,
+            OBJIndex& result
+        )
+        {
+            result = {};
+
+            const std::string_view TokenView(token); //Slash位置を調べるToken全体
+            const std::size_t FirstSlash = TokenView.find('/'); //Position後のSlash位置
+            const std::string_view PositionPart = TokenView.substr(
+                0,
+                FirstSlash
+            ); //必須Position Index文字列
+
+            if (!ParseInteger(PositionPart, result.Position) ||
+                result.Position == 0)
+            {
+                return false;
+            }
+
+            if (FirstSlash == std::string_view::npos)
+            {
+                return true;
+            }
+
+            const std::size_t SecondSlash = TokenView.find(
+                '/',
+                FirstSlash + 1
+            ); //UV後のSlash位置
+            const std::size_t UVEnd = SecondSlash == std::string_view::npos
+                ? TokenView.size()
+                : SecondSlash; //UV Index文字列の末尾
+            const std::string_view UVPart = TokenView.substr(
+                FirstSlash + 1,
+                UVEnd - FirstSlash - 1
+            ); //省略可能なUV Index文字列
+
+            if (!UVPart.empty() && !ParseInteger(UVPart, result.UV))
+            {
+                return false;
+            }
+
+            if (SecondSlash == std::string_view::npos)
+            {
+                return true;
+            }
+
+            if (TokenView.find('/', SecondSlash + 1) !=
+                std::string_view::npos)
+            {
+                return false;
+            }
+
+            const std::string_view NormalPart = TokenView.substr(
+                SecondSlash + 1
+            ); //省略可能なNormal Index文字列
+
+            if (!NormalPart.empty() &&
+                !ParseInteger(NormalPart, result.Normal))
+            {
+                return false;
+            }
+
+            return true;
         }
 
         const char* OBJShaderCode = R"(
@@ -151,42 +273,61 @@ float4 PSMain(VSOutput input) : SV_TARGET
     return gColor;
 }
 
-)";
+)"; //OBJ Model描画用HLSL Source
     }
 
+    //未登録状態のOBJ Model Componentを作成する
     OBJModel::OBJModel()
-        : m_VertexBufferView{}
-        , m_IndexBufferView{}
-        , m_MappedConstantBuffer(nullptr)
-        , m_Position(0.0f, 0.0f, 0.0f)
-        , m_Rotation(0.0f, 0.0f, 0.0f)
-        , m_Scale(1.0f, 1.0f, 1.0f)
-        , m_Color(1.0f, 1.0f, 1.0f, 1.0f)
-        , m_UseTexture(false)
+        : Model()
+        , VertexBufferView{}
+        , IndexBufferView{}
+        , Color(1.0f, 1.0f, 1.0f, 1.0f)
+        , UseTexture(false)
+        , TextureRequested(false)
     {
     }
 
+    //OBJ Model Componentを破棄する
     OBJModel::~OBJModel()
     {
-        if (m_ConstantBuffer && m_MappedConstantBuffer)
-        {
-            m_ConstantBuffer->Unmap(
-                0,
-                nullptr
-            );
-
-            m_MappedConstantBuffer = nullptr;
-        }
+        Finalize();
     }
 
+    //OBJ Modelの終了処理を行う
+    void OBJModel::Finalize()
+    {
+    }
+
+    //未登録状態のOBJ Model定義を複製する
+    //戻り値: CPU Meshと色を持つ複製Component
+    std::unique_ptr<Component> OBJModel::Clone() const
+    {
+        auto Duplicate = std::make_unique<OBJModel>(); //未登録の複製Model
+        Duplicate->Vertices = Vertices;
+        Duplicate->Indices = Indices;
+        Duplicate->Color = Color;
+        Duplicate->SourceOBJPath = SourceOBJPath;
+        Duplicate->SourceTexturePath = SourceTexturePath;
+        Duplicate->UseTexture = UseTexture;
+        Duplicate->TextureRequested = TextureRequested;
+        CopyDefinitionTo(*Duplicate);
+        return Duplicate;
+    }
+
+    //OBJとDiffuse Textureを読み込みGPU Resourceを作成する
+    //引数: dx12 描画基盤、objPath OBJパス、texturePath Textureパス
+    //戻り値: 読み込みとResource作成に成功した場合はtrue
     bool OBJModel::Load(
         DirectX12& dx12,
         const std::wstring& objPath,
         const std::wstring& texturePath
     )
     {
-        m_UseTexture = true;
-        m_Color = DirectX::XMFLOAT4(
+        SourceOBJPath = objPath;
+        SourceTexturePath = texturePath;
+        TextureRequested = true;
+        UseTexture = true;
+        Color = DirectX::XMFLOAT4(
             1.0f,
             1.0f,
             1.0f,
@@ -194,18 +335,28 @@ float4 PSMain(VSOutput input) : SV_TARGET
         );
 
         if (!LoadOBJFile(objPath)) return false;
-        if (!CreateRootSignature(dx12)) return false;
-        if (!CreatePipelineState(dx12)) return false;
-        if (!CreateVertexBuffer(dx12)) return false;
-        if (!CreateIndexBuffer(dx12)) return false;
-        if (!CreateConstantBuffer(dx12)) return false;
 
-        if (!m_Texture.LoadFromFile(dx12, texturePath))
+        if (!CreateRootSignature(dx12) || !CreatePipelineState(dx12) ||
+            !CreateVertexBuffer(dx12) || !CreateIndexBuffer(dx12))
         {
-            m_UseTexture = false;
+            MessageLog::GetInstance().AddLog(
+                "[Error] OBJModel | A model drawing resource could not be created."
+            );
+            return false;
+        }
 
-            if (!m_Texture.CreateWhiteTexture(dx12))
+        if (!Texture.LoadFromFile(dx12, texturePath))
+        {
+            UseTexture = false;
+            MessageLog::GetInstance().AddLog(
+                "[Warning] OBJModel | Diffuse texture loading failed; a white fallback texture will be used."
+            );
+
+            if (!Texture.CreateWhiteTexture(dx12))
             {
+                MessageLog::GetInstance().AddLog(
+                    "[Error] OBJModel | Fallback white texture creation failed."
+                );
                 return false;
             }
         }
@@ -213,141 +364,230 @@ float4 PSMain(VSOutput input) : SV_TARGET
         return true;
     }
 
+    //OBJを単色Modelとして読み込みGPU Resourceを作成する
+    //引数: dx12 描画基盤、objPath OBJパス、color 描画色
+    //戻り値: 読み込みとResource作成に成功した場合はtrue
     bool OBJModel::Load(
         DirectX12& dx12,
         const std::wstring& objPath,
         const DirectX::XMFLOAT4& color
     )
     {
-        m_UseTexture = false;
-        m_Color = color;
+        SourceOBJPath = objPath;
+        SourceTexturePath.clear();
+        TextureRequested = false;
+        UseTexture = false;
+        Color = color;
 
         if (!LoadOBJFile(objPath)) return false;
-        if (!CreateRootSignature(dx12)) return false;
-        if (!CreatePipelineState(dx12)) return false;
-        if (!CreateVertexBuffer(dx12)) return false;
-        if (!CreateIndexBuffer(dx12)) return false;
-        if (!CreateConstantBuffer(dx12)) return false;
 
-        if (!m_Texture.CreateWhiteTexture(dx12))
+        if (!CreateRootSignature(dx12) || !CreatePipelineState(dx12) ||
+            !CreateVertexBuffer(dx12) || !CreateIndexBuffer(dx12))
         {
+            MessageLog::GetInstance().AddLog(
+                "[Error] OBJModel | A color model drawing resource could not be created."
+            );
+            return false;
+        }
+
+        if (!Texture.CreateWhiteTexture(dx12))
+        {
+            MessageLog::GetInstance().AddLog(
+                "[Error] OBJModel | Color model white texture creation failed."
+            );
             return false;
         }
 
         return true;
     }
 
+    //複製済みCPU MeshからGPU Resourceを再作成する
+    //引数: dx12 描画基盤
+    //戻り値: Resource作成に成功またはMesh未設定の場合はtrue
+    bool OBJModel::Initialize(DirectX12& dx12)
+    {
+        if (PipelineState && RootSignature && VertexBuffer && IndexBuffer &&
+            Texture.IsValid())
+        {
+            return true;
+        }
+
+        if (!SourceOBJPath.empty())
+        {
+            if (TextureRequested)
+            {
+                return Load(
+                    dx12,
+                    SourceOBJPath,
+                    SourceTexturePath
+                );
+            }
+
+            return Load(dx12, SourceOBJPath, Color);
+        }
+
+        if (Vertices.empty() || Indices.empty())
+        {
+            return true;
+        }
+
+        UseTexture = false;
+
+        if (!CreateRootSignature(dx12)) return false;
+        if (!CreatePipelineState(dx12)) return false;
+        if (!CreateVertexBuffer(dx12)) return false;
+        if (!CreateIndexBuffer(dx12)) return false;
+
+        return Texture.CreateWhiteTexture(dx12);
+    }
+
+    //OBJテキストから頂点とIndexを読み込む
+    //引数: objPath 読み込むOBJファイル
+    //戻り値: 描画可能な面を読み込めた場合はtrue
     bool OBJModel::LoadOBJFile(
         const std::wstring& objPath
     )
     {
-        m_Vertices.clear();
-        m_Indices.clear();
+        Vertices.clear();
+        Indices.clear();
 
-        std::ifstream file(ToString(objPath));
+        std::ifstream File{ std::filesystem::path(objPath) }; //OBJ入力File Stream
 
-        if (!file)
+        if (!File)
         {
+            MessageLog::GetInstance().AddLog(
+                "[Error] OBJModel | OBJ file could not be opened."
+            );
             return false;
         }
 
-        std::vector<DirectX::XMFLOAT3> positions;
-        std::vector<DirectX::XMFLOAT3> normals;
-        std::vector<DirectX::XMFLOAT2> uvs;
+        std::vector<DirectX::XMFLOAT3> Positions; //OBJ Position配列
+        std::vector<DirectX::XMFLOAT3> Normals; //OBJ法線配列
+        std::vector<DirectX::XMFLOAT2> UVs; //OBJ Texture座標配列
 
         std::unordered_map<
             OBJIndex,
             uint32_t,
             OBJIndexHash
-        > vertexMap;
+        > VertexMap; //OBJ Index組から共有頂点IndexへのMap
 
-        std::string line;
+        std::string Line; //現在解析中の一行
+        std::size_t LineNumber = 0; // 現在解析中のOBJ行番号
 
-        while (std::getline(file, line))
+        const auto ReportParseFailure = [&LineNumber](const char* reason)
         {
-            std::stringstream ss(line);
+            char Message[320]{}; // 行番号と解析失敗理由を含む表示用メッセージ
+            sprintf_s(
+                Message,
+                "[Error] OBJModel | Invalid OBJ data at line %zu: %s.",
+                LineNumber,
+                reason
+            );
+            MessageLog::GetInstance().AddLog(Message);
+            return false;
+        }; // 同一行で複数ログを発生させず呼び出し元へfalseを返す処理
 
-            std::string type;
-            ss >> type;
+        while (std::getline(File, Line))
+        {
+            ++LineNumber;
+            std::stringstream Stream(Line); //現在行のToken解析Stream
 
-            if (type == "v")
+            std::string Type; //現在行のOBJ要素種別
+            Stream >> Type;
+
+            if (Type == "v")
             {
-                DirectX::XMFLOAT3 p{};
-                ss >> p.x >> p.y >> p.z;
+                DirectX::XMFLOAT3 Position{}; //読み込んだPosition
 
-                positions.push_back(p);
-            }
-            else if (type == "vt")
-            {
-                DirectX::XMFLOAT2 uv{};
-                ss >> uv.x >> uv.y;
-
-                // OBJ��V�������t�ɂȂ邱�Ƃ��������ߔ��]
-                uv.y = 1.0f - uv.y;
-
-                uvs.push_back(uv);
-            }
-            else if (type == "vn")
-            {
-                DirectX::XMFLOAT3 n{};
-                ss >> n.x >> n.y >> n.z;
-
-                normals.push_back(n);
-            }
-            else if (type == "f")
-            {
-                std::vector<uint32_t> faceIndices;
-
-                std::string token;
-
-                while (ss >> token)
+                if (!(Stream >> Position.x >> Position.y >> Position.z))
                 {
-                    OBJIndex rawIndex =
-                        ParseFaceToken(token);
+                    return ReportParseFailure("position requires three finite numbers");
+                }
 
-                    OBJIndex resolved{};
-                    resolved.position =
-                        ResolveOBJIndex(
-                            rawIndex.position,
-                            static_cast<int>(positions.size())
-                        );
+                Positions.push_back(Position);
+            }
+            else if (Type == "vt")
+            {
+                DirectX::XMFLOAT2 UV{}; //読み込んだTexture座標
 
-                    resolved.uv =
-                        ResolveOBJIndex(
-                            rawIndex.uv,
-                            static_cast<int>(uvs.size())
-                        );
+                if (!(Stream >> UV.x >> UV.y))
+                {
+                    return ReportParseFailure("texture coordinate requires two numbers");
+                }
 
-                    resolved.normal =
-                        ResolveOBJIndex(
-                            rawIndex.normal,
-                            static_cast<int>(normals.size())
-                        );
+                // OBJはV方向が逆になることが多いため反転
+                UV.y = 1.0f - UV.y;
 
-                    auto it = vertexMap.find(resolved);
+                UVs.push_back(UV);
+            }
+            else if (Type == "vn")
+            {
+                DirectX::XMFLOAT3 Normal{}; //読み込んだ法線
 
-                    if (it != vertexMap.end())
+                if (!(Stream >> Normal.x >> Normal.y >> Normal.z))
+                {
+                    return ReportParseFailure("normal requires three numbers");
+                }
+
+                Normals.push_back(Normal);
+            }
+            else if (Type == "f")
+            {
+                std::vector<uint32_t> FaceIndices; //現在Faceの共有頂点Index一覧
+
+                std::string Token; //現在解析中のFace要素
+
+                while (Stream >> Token)
+                {
+                    OBJIndex RawIndex{}; //OBJ表記の未解決Index組
+
+                    if (!ParseFaceToken(Token, RawIndex))
                     {
-                        faceIndices.push_back(it->second);
+                        return ReportParseFailure("face token format is invalid");
+                    }
+
+                    OBJIndex ResolvedIndex{}; //ゼロ始まりへ解決したIndex組
+
+                    if (!ResolveOBJIndex(
+                        RawIndex.Position,
+                        Positions.size(),
+                        true,
+                        ResolvedIndex.Position) ||
+                        !ResolveOBJIndex(
+                            RawIndex.UV,
+                            UVs.size(),
+                            false,
+                            ResolvedIndex.UV) ||
+                        !ResolveOBJIndex(
+                            RawIndex.Normal,
+                            Normals.size(),
+                            false,
+                            ResolvedIndex.Normal))
+                    {
+                        return ReportParseFailure("face index is outside the declared arrays");
+                    }
+
+                    auto VertexIterator = VertexMap.find(ResolvedIndex); //既存共有頂点の検索結果
+
+                    if (VertexIterator != VertexMap.end())
+                    {
+                        FaceIndices.push_back(VertexIterator->second);
                     }
                     else
                     {
-                        OBJVertex vertex{};
+                        OBJVertex VertexData{}; //新規共有頂点
 
-                        if (resolved.position >= 0)
-                        {
-                            vertex.position =
-                                positions[resolved.position];
-                        }
+                        VertexData.Position =
+                            Positions[ResolvedIndex.Position];
 
-                        if (resolved.normal >= 0)
+                        if (ResolvedIndex.Normal >= 0)
                         {
-                            vertex.normal =
-                                normals[resolved.normal];
+                            VertexData.Normal =
+                                Normals[ResolvedIndex.Normal];
                         }
                         else
                         {
-                            vertex.normal =
+                            VertexData.Normal =
                                 DirectX::XMFLOAT3(
                                     0.0f,
                                     1.0f,
@@ -355,151 +595,169 @@ float4 PSMain(VSOutput input) : SV_TARGET
                                 );
                         }
 
-                        if (resolved.uv >= 0)
+                        if (ResolvedIndex.UV >= 0)
                         {
-                            vertex.uv =
-                                uvs[resolved.uv];
+                            VertexData.UV =
+                                UVs[ResolvedIndex.UV];
                         }
                         else
                         {
-                            vertex.uv =
+                            VertexData.UV =
                                 DirectX::XMFLOAT2(
                                     0.0f,
                                     0.0f
                                 );
                         }
 
-                        uint32_t newIndex =
+                        uint32_t NewIndex =
                             static_cast<uint32_t>(
-                                m_Vertices.size()
-                                );
+                                Vertices.size()
+                                ); //新規共有頂点Index
 
-                        m_Vertices.push_back(vertex);
+                        Vertices.push_back(VertexData);
 
-                        vertexMap.emplace(
-                            resolved,
-                            newIndex
+                        VertexMap.emplace(
+                            ResolvedIndex,
+                            NewIndex
                         );
 
-                        faceIndices.push_back(newIndex);
+                        FaceIndices.push_back(NewIndex);
                     }
                 }
 
-                // �O�p�`�E�l�p�`�E���p�`��Triangle Fan�ŕ���
-                for (size_t i = 1; i + 1 < faceIndices.size(); ++i)
+                if (FaceIndices.size() < 3)
                 {
-                    m_Indices.push_back(faceIndices[0]);
-                    m_Indices.push_back(faceIndices[i]);
-                    m_Indices.push_back(faceIndices[i + 1]);
+                    return ReportParseFailure("face has fewer than three vertices");
+                }
+
+                // 三角形・四角形・多角形をTriangle Fanで分解
+                for (size_t Index = 1; Index + 1 < FaceIndices.size(); ++Index) //FaceをTriangle Fanへ分解する
+                {
+                    Indices.push_back(FaceIndices[0]);
+                    Indices.push_back(FaceIndices[Index]);
+                    Indices.push_back(FaceIndices[Index + 1]);
                 }
             }
         }
 
-        return !m_Vertices.empty() && !m_Indices.empty();
+        if (Vertices.empty() || Indices.empty())
+        {
+            return ReportParseFailure("file does not contain a drawable face");
+        }
+
+        return true;
     }
 
+    //Model描画用RootSignatureを作成する
+    //引数: dx12 描画基盤
+    //戻り値: 作成に成功した場合はtrue
     bool OBJModel::CreateRootSignature(
         DirectX12& dx12
     )
     {
-        D3D12_DESCRIPTOR_RANGE srvRange{};
-        srvRange.RangeType =
+        D3D12_DESCRIPTOR_RANGE SRVRange{}; //Diffuse Texture用Descriptor Range
+        SRVRange.RangeType =
             D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-        srvRange.NumDescriptors = 1;
-        srvRange.BaseShaderRegister = 0;
-        srvRange.RegisterSpace = 0;
-        srvRange.OffsetInDescriptorsFromTableStart =
+        SRVRange.NumDescriptors = 1;
+        SRVRange.BaseShaderRegister = 0;
+        SRVRange.RegisterSpace = 0;
+        SRVRange.OffsetInDescriptorsFromTableStart =
             D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
 
-        D3D12_ROOT_PARAMETER rootParameters[2]{};
+        D3D12_ROOT_PARAMETER RootParameters[2]{}; //描画定数とTexture用Root Parameters
 
-        rootParameters[0].ParameterType =
-            D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParameters[0].Descriptor.ShaderRegister = 0;
-        rootParameters[0].Descriptor.RegisterSpace = 0;
-        rootParameters[0].ShaderVisibility =
+        RootParameters[0].ParameterType =
+            D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        RootParameters[0].Constants.ShaderRegister = 0;
+        RootParameters[0].Constants.RegisterSpace = 0;
+        RootParameters[0].Constants.Num32BitValues =
+            OBJRootConstantCount;
+        RootParameters[0].ShaderVisibility =
             D3D12_SHADER_VISIBILITY_ALL;
 
-        rootParameters[1].ParameterType =
+        RootParameters[1].ParameterType =
             D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-        rootParameters[1].DescriptorTable.NumDescriptorRanges = 1;
-        rootParameters[1].DescriptorTable.pDescriptorRanges =
-            &srvRange;
-        rootParameters[1].ShaderVisibility =
+        RootParameters[1].DescriptorTable.NumDescriptorRanges = 1;
+        RootParameters[1].DescriptorTable.pDescriptorRanges =
+            &SRVRange;
+        RootParameters[1].ShaderVisibility =
             D3D12_SHADER_VISIBILITY_PIXEL;
 
-        D3D12_STATIC_SAMPLER_DESC sampler{};
-        sampler.Filter =
+        D3D12_STATIC_SAMPLER_DESC Sampler{}; //Diffuse Texture用Sampler設定
+        Sampler.Filter =
             D3D12_FILTER_MIN_MAG_MIP_LINEAR;
-        sampler.AddressU =
+        Sampler.AddressU =
             D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        sampler.AddressV =
+        Sampler.AddressV =
             D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        sampler.AddressW =
+        Sampler.AddressW =
             D3D12_TEXTURE_ADDRESS_MODE_WRAP;
-        sampler.MipLODBias = 0.0f;
-        sampler.MaxAnisotropy = 1;
-        sampler.ComparisonFunc =
+        Sampler.MipLODBias = 0.0f;
+        Sampler.MaxAnisotropy = 1;
+        Sampler.ComparisonFunc =
             D3D12_COMPARISON_FUNC_ALWAYS;
-        sampler.BorderColor =
+        Sampler.BorderColor =
             D3D12_STATIC_BORDER_COLOR_OPAQUE_WHITE;
-        sampler.MinLOD = 0.0f;
-        sampler.MaxLOD = D3D12_FLOAT32_MAX;
-        sampler.ShaderRegister = 0;
-        sampler.RegisterSpace = 0;
-        sampler.ShaderVisibility =
+        Sampler.MinLOD = 0.0f;
+        Sampler.MaxLOD = D3D12_FLOAT32_MAX;
+        Sampler.ShaderRegister = 0;
+        Sampler.RegisterSpace = 0;
+        Sampler.ShaderVisibility =
             D3D12_SHADER_VISIBILITY_PIXEL;
 
-        D3D12_ROOT_SIGNATURE_DESC desc{};
-        desc.NumParameters = 2;
-        desc.pParameters = rootParameters;
-        desc.NumStaticSamplers = 1;
-        desc.pStaticSamplers = &sampler;
-        desc.Flags =
+        D3D12_ROOT_SIGNATURE_DESC Description{}; //RootSignature設定
+        Description.NumParameters = 2;
+        Description.pParameters = RootParameters;
+        Description.NumStaticSamplers = 1;
+        Description.pStaticSamplers = &Sampler;
+        Description.Flags =
             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
-        Microsoft::WRL::ComPtr<ID3DBlob> signature;
-        Microsoft::WRL::ComPtr<ID3DBlob> error;
+        Microsoft::WRL::ComPtr<ID3DBlob> Signature; //Serialize済みRootSignature
+        Microsoft::WRL::ComPtr<ID3DBlob> Error; //Serialize失敗内容
 
-        HRESULT hr = D3D12SerializeRootSignature(
-            &desc,
+        HRESULT Result = D3D12SerializeRootSignature(
+            &Description,
             D3D_ROOT_SIGNATURE_VERSION_1,
-            &signature,
-            &error
-        );
+            &Signature,
+            &Error
+        ); //RootSignatureのSerialize結果
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
-        hr = dx12.GetDevice()->CreateRootSignature(
+        Result = dx12.GetDevice()->CreateRootSignature(
             0,
-            signature->GetBufferPointer(),
-            signature->GetBufferSize(),
-            IID_PPV_ARGS(&m_RootSignature)
+            Signature->GetBufferPointer(),
+            Signature->GetBufferSize(),
+            IID_PPV_ARGS(&RootSignature)
         );
 
-        return SUCCEEDED(hr);
+        return SUCCEEDED(Result);
     }
 
+    //Model描画用PipelineStateを作成する
+    //引数: dx12 描画基盤
+    //戻り値: 作成に成功した場合はtrue
     bool OBJModel::CreatePipelineState(
         DirectX12& dx12
     )
     {
-        Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
-        Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
-        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+        Microsoft::WRL::ComPtr<ID3DBlob> VertexShaderBlob; //Compile済みVertex Shader
+        Microsoft::WRL::ComPtr<ID3DBlob> PixelShaderBlob; //Compile済みPixel Shader
+        Microsoft::WRL::ComPtr<ID3DBlob> ErrorBlob; //Shader Compile失敗内容
 
-        UINT compileFlags = 0;
+        UINT CompileFlags = 0; //Shader Compile Option
 
 #if defined(_DEBUG)
-        compileFlags =
+        CompileFlags =
             D3DCOMPILE_DEBUG |
             D3DCOMPILE_SKIP_OPTIMIZATION;
 #endif
 
-        HRESULT hr = D3DCompile(
+        HRESULT Result = D3DCompile(
             OBJShaderCode,
             std::strlen(OBJShaderCode),
             nullptr,
@@ -507,18 +765,18 @@ float4 PSMain(VSOutput input) : SV_TARGET
             nullptr,
             "VSMain",
             "vs_5_0",
-            compileFlags,
+            CompileFlags,
             0,
-            &vsBlob,
-            &errorBlob
-        );
+            &VertexShaderBlob,
+            &ErrorBlob
+        ); //Vertex Shader Compile結果
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
-        hr = D3DCompile(
+        Result = D3DCompile(
             OBJShaderCode,
             std::strlen(OBJShaderCode),
             nullptr,
@@ -526,368 +784,303 @@ float4 PSMain(VSOutput input) : SV_TARGET
             nullptr,
             "PSMain",
             "ps_5_0",
-            compileFlags,
+            CompileFlags,
             0,
-            &psBlob,
-            &errorBlob
+            &PixelShaderBlob,
+            &ErrorBlob
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
-        D3D12_INPUT_ELEMENT_DESC inputLayout[3]{};
+        D3D12_INPUT_ELEMENT_DESC InputLayout[3]{}; //Position、Normal、UVの頂点入力定義
 
-        inputLayout[0].SemanticName = "POSITION";
-        inputLayout[0].Format =
+        InputLayout[0].SemanticName = "POSITION";
+        InputLayout[0].Format =
             DXGI_FORMAT_R32G32B32_FLOAT;
-        inputLayout[0].InputSlot = 0;
-        inputLayout[0].AlignedByteOffset = 0;
-        inputLayout[0].InputSlotClass =
+        InputLayout[0].InputSlot = 0;
+        InputLayout[0].AlignedByteOffset = 0;
+        InputLayout[0].InputSlotClass =
             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
 
-        inputLayout[1].SemanticName = "NORMAL";
-        inputLayout[1].Format =
+        InputLayout[1].SemanticName = "NORMAL";
+        InputLayout[1].Format =
             DXGI_FORMAT_R32G32B32_FLOAT;
-        inputLayout[1].InputSlot = 0;
-        inputLayout[1].AlignedByteOffset = 12;
-        inputLayout[1].InputSlotClass =
+        InputLayout[1].InputSlot = 0;
+        InputLayout[1].AlignedByteOffset = 12;
+        InputLayout[1].InputSlotClass =
             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
 
-        inputLayout[2].SemanticName = "TEXCOORD";
-        inputLayout[2].Format =
+        InputLayout[2].SemanticName = "TEXCOORD";
+        InputLayout[2].Format =
             DXGI_FORMAT_R32G32_FLOAT;
-        inputLayout[2].InputSlot = 0;
-        inputLayout[2].AlignedByteOffset = 24;
-        inputLayout[2].InputSlotClass =
+        InputLayout[2].InputSlot = 0;
+        InputLayout[2].AlignedByteOffset = 24;
+        InputLayout[2].InputSlotClass =
             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
 
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
-        psoDesc.pRootSignature =
-            m_RootSignature.Get();
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC PipelineDescription{}; //Model描画Pipeline設定
+        PipelineDescription.pRootSignature =
+            RootSignature.Get();
 
-        psoDesc.VS.pShaderBytecode =
-            vsBlob->GetBufferPointer();
-        psoDesc.VS.BytecodeLength =
-            vsBlob->GetBufferSize();
+        PipelineDescription.VS.pShaderBytecode =
+            VertexShaderBlob->GetBufferPointer();
+        PipelineDescription.VS.BytecodeLength =
+            VertexShaderBlob->GetBufferSize();
 
-        psoDesc.PS.pShaderBytecode =
-            psBlob->GetBufferPointer();
-        psoDesc.PS.BytecodeLength =
-            psBlob->GetBufferSize();
+        PipelineDescription.PS.pShaderBytecode =
+            PixelShaderBlob->GetBufferPointer();
+        PipelineDescription.PS.BytecodeLength =
+            PixelShaderBlob->GetBufferSize();
 
-        psoDesc.InputLayout.pInputElementDescs =
-            inputLayout;
-        psoDesc.InputLayout.NumElements = 3;
+        PipelineDescription.InputLayout.pInputElementDescs =
+            InputLayout;
+        PipelineDescription.InputLayout.NumElements = 3;
 
-        psoDesc.PrimitiveTopologyType =
+        PipelineDescription.PrimitiveTopologyType =
             D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 
-        psoDesc.NumRenderTargets = 1;
-        psoDesc.RTVFormats[0] =
+        PipelineDescription.NumRenderTargets = 1;
+        PipelineDescription.RTVFormats[0] =
             dx12.GetBackBufferFormat();
-        psoDesc.DSVFormat =
+        PipelineDescription.DSVFormat =
             dx12.GetDepthStencilFormat();
 
-        psoDesc.SampleDesc.Count = 1;
-        psoDesc.SampleDesc.Quality = 0;
-        psoDesc.SampleMask = UINT_MAX;
+        PipelineDescription.SampleDesc.Count = 1;
+        PipelineDescription.SampleDesc.Quality = 0;
+        PipelineDescription.SampleMask = UINT_MAX;
 
-        psoDesc.RasterizerState.FillMode =
+        PipelineDescription.RasterizerState.FillMode =
             D3D12_FILL_MODE_SOLID;
-        psoDesc.RasterizerState.CullMode =
+        PipelineDescription.RasterizerState.CullMode =
             D3D12_CULL_MODE_NONE;
-        psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
-        psoDesc.RasterizerState.DepthClipEnable = TRUE;
-        psoDesc.RasterizerState.MultisampleEnable = FALSE;
-        psoDesc.RasterizerState.AntialiasedLineEnable = FALSE;
-        psoDesc.RasterizerState.ForcedSampleCount = 0;
-        psoDesc.RasterizerState.ConservativeRaster =
+        PipelineDescription.RasterizerState.FrontCounterClockwise = FALSE;
+        PipelineDescription.RasterizerState.DepthClipEnable = TRUE;
+        PipelineDescription.RasterizerState.MultisampleEnable = FALSE;
+        PipelineDescription.RasterizerState.AntialiasedLineEnable = FALSE;
+        PipelineDescription.RasterizerState.ForcedSampleCount = 0;
+        PipelineDescription.RasterizerState.ConservativeRaster =
             D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
-        psoDesc.BlendState.AlphaToCoverageEnable = FALSE;
-        psoDesc.BlendState.IndependentBlendEnable = FALSE;
+        PipelineDescription.BlendState.AlphaToCoverageEnable = FALSE;
+        PipelineDescription.BlendState.IndependentBlendEnable = FALSE;
 
-        D3D12_RENDER_TARGET_BLEND_DESC blendDesc{};
-        blendDesc.BlendEnable = FALSE;
-        blendDesc.LogicOpEnable = FALSE;
-        blendDesc.SrcBlend =
+        D3D12_RENDER_TARGET_BLEND_DESC BlendDescription{}; //単一RenderTargetのBlend設定
+        BlendDescription.BlendEnable = FALSE;
+        BlendDescription.LogicOpEnable = FALSE;
+        BlendDescription.SrcBlend =
             D3D12_BLEND_ONE;
-        blendDesc.DestBlend =
+        BlendDescription.DestBlend =
             D3D12_BLEND_ZERO;
-        blendDesc.BlendOp =
+        BlendDescription.BlendOp =
             D3D12_BLEND_OP_ADD;
-        blendDesc.SrcBlendAlpha =
+        BlendDescription.SrcBlendAlpha =
             D3D12_BLEND_ONE;
-        blendDesc.DestBlendAlpha =
+        BlendDescription.DestBlendAlpha =
             D3D12_BLEND_ZERO;
-        blendDesc.BlendOpAlpha =
+        BlendDescription.BlendOpAlpha =
             D3D12_BLEND_OP_ADD;
-        blendDesc.LogicOp =
+        BlendDescription.LogicOp =
             D3D12_LOGIC_OP_NOOP;
-        blendDesc.RenderTargetWriteMask =
+        BlendDescription.RenderTargetWriteMask =
             D3D12_COLOR_WRITE_ENABLE_ALL;
 
-        psoDesc.BlendState.RenderTarget[0] =
-            blendDesc;
+        PipelineDescription.BlendState.RenderTarget[0] =
+            BlendDescription;
 
-        psoDesc.DepthStencilState.DepthEnable = TRUE;
-        psoDesc.DepthStencilState.DepthWriteMask =
+        PipelineDescription.DepthStencilState.DepthEnable = TRUE;
+        PipelineDescription.DepthStencilState.DepthWriteMask =
             D3D12_DEPTH_WRITE_MASK_ALL;
-        psoDesc.DepthStencilState.DepthFunc =
+        PipelineDescription.DepthStencilState.DepthFunc =
             D3D12_COMPARISON_FUNC_LESS_EQUAL;
-        psoDesc.DepthStencilState.StencilEnable = FALSE;
+        PipelineDescription.DepthStencilState.StencilEnable = FALSE;
 
-        psoDesc.IBStripCutValue =
+        PipelineDescription.IBStripCutValue =
             D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
 
-        hr = dx12.GetDevice()->CreateGraphicsPipelineState(
-            &psoDesc,
-            IID_PPV_ARGS(&m_PipelineState)
+        Result = dx12.GetDevice()->CreateGraphicsPipelineState(
+            &PipelineDescription,
+            IID_PPV_ARGS(&PipelineState)
         );
 
-        return SUCCEEDED(hr);
+        return SUCCEEDED(Result);
     }
 
+    //頂点Bufferを作成する
+    //引数: dx12 描画基盤
+    //戻り値: 作成に成功した場合はtrue
     bool OBJModel::CreateVertexBuffer(
         DirectX12& dx12
     )
     {
-        const UINT bufferSize =
+        const UINT BufferSize =
             static_cast<UINT>(
-                sizeof(OBJVertex) * m_Vertices.size()
-                );
+                sizeof(OBJVertex) * Vertices.size()
+                ); //頂点BufferのByte数
 
-        D3D12_HEAP_PROPERTIES heap{};
-        heap.Type =
+        D3D12_HEAP_PROPERTIES HeapProperties{}; //Upload Heap設定
+        HeapProperties.Type =
             D3D12_HEAP_TYPE_UPLOAD;
-        heap.CPUPageProperty =
+        HeapProperties.CPUPageProperty =
             D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        heap.MemoryPoolPreference =
+        HeapProperties.MemoryPoolPreference =
             D3D12_MEMORY_POOL_UNKNOWN;
-        heap.CreationNodeMask = 1;
-        heap.VisibleNodeMask = 1;
+        HeapProperties.CreationNodeMask = 1;
+        HeapProperties.VisibleNodeMask = 1;
 
-        D3D12_RESOURCE_DESC desc{};
-        desc.Dimension =
+        D3D12_RESOURCE_DESC ResourceDescription{}; //頂点Buffer Resource設定
+        ResourceDescription.Dimension =
             D3D12_RESOURCE_DIMENSION_BUFFER;
-        desc.Width = bufferSize;
-        desc.Height = 1;
-        desc.DepthOrArraySize = 1;
-        desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_UNKNOWN;
-        desc.SampleDesc.Count = 1;
-        desc.Layout =
+        ResourceDescription.Width = BufferSize;
+        ResourceDescription.Height = 1;
+        ResourceDescription.DepthOrArraySize = 1;
+        ResourceDescription.MipLevels = 1;
+        ResourceDescription.Format = DXGI_FORMAT_UNKNOWN;
+        ResourceDescription.SampleDesc.Count = 1;
+        ResourceDescription.Layout =
             D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-        HRESULT hr = dx12.GetDevice()->CreateCommittedResource(
-            &heap,
+        HRESULT Result = dx12.GetDevice()->CreateCommittedResource(
+            &HeapProperties,
             D3D12_HEAP_FLAG_NONE,
-            &desc,
+            &ResourceDescription,
             D3D12_RESOURCE_STATE_GENERIC_READ,
             nullptr,
-            IID_PPV_ARGS(&m_VertexBuffer)
-        );
+            IID_PPV_ARGS(&VertexBuffer)
+        ); //頂点Buffer作成結果
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
-        void* mapped = nullptr;
+        void* MappedData = nullptr; //頂点BufferのCPU書込先
 
-        hr = m_VertexBuffer->Map(
+        Result = VertexBuffer->Map(
             0,
             nullptr,
-            &mapped
+            &MappedData
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
         std::memcpy(
-            mapped,
-            m_Vertices.data(),
-            bufferSize
+            MappedData,
+            Vertices.data(),
+            BufferSize
         );
 
-        m_VertexBuffer->Unmap(
+        VertexBuffer->Unmap(
             0,
             nullptr
         );
 
-        m_VertexBufferView.BufferLocation =
-            m_VertexBuffer->GetGPUVirtualAddress();
-        m_VertexBufferView.SizeInBytes =
-            bufferSize;
-        m_VertexBufferView.StrideInBytes =
+        VertexBufferView.BufferLocation =
+            VertexBuffer->GetGPUVirtualAddress();
+        VertexBufferView.SizeInBytes =
+            BufferSize;
+        VertexBufferView.StrideInBytes =
             sizeof(OBJVertex);
 
         return true;
     }
 
+    //Index Bufferを作成する
+    //引数: dx12 描画基盤
+    //戻り値: 作成に成功した場合はtrue
     bool OBJModel::CreateIndexBuffer(
         DirectX12& dx12
     )
     {
-        const UINT bufferSize =
+        const UINT BufferSize =
             static_cast<UINT>(
-                sizeof(uint32_t) * m_Indices.size()
-                );
+                sizeof(uint32_t) * Indices.size()
+                ); //Index BufferのByte数
 
-        D3D12_HEAP_PROPERTIES heap{};
-        heap.Type =
+        D3D12_HEAP_PROPERTIES HeapProperties{}; //Upload Heap設定
+        HeapProperties.Type =
             D3D12_HEAP_TYPE_UPLOAD;
-        heap.CPUPageProperty =
+        HeapProperties.CPUPageProperty =
             D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        heap.MemoryPoolPreference =
+        HeapProperties.MemoryPoolPreference =
             D3D12_MEMORY_POOL_UNKNOWN;
-        heap.CreationNodeMask = 1;
-        heap.VisibleNodeMask = 1;
+        HeapProperties.CreationNodeMask = 1;
+        HeapProperties.VisibleNodeMask = 1;
 
-        D3D12_RESOURCE_DESC desc{};
-        desc.Dimension =
+        D3D12_RESOURCE_DESC ResourceDescription{}; //Index Buffer Resource設定
+        ResourceDescription.Dimension =
             D3D12_RESOURCE_DIMENSION_BUFFER;
-        desc.Width = bufferSize;
-        desc.Height = 1;
-        desc.DepthOrArraySize = 1;
-        desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_UNKNOWN;
-        desc.SampleDesc.Count = 1;
-        desc.Layout =
+        ResourceDescription.Width = BufferSize;
+        ResourceDescription.Height = 1;
+        ResourceDescription.DepthOrArraySize = 1;
+        ResourceDescription.MipLevels = 1;
+        ResourceDescription.Format = DXGI_FORMAT_UNKNOWN;
+        ResourceDescription.SampleDesc.Count = 1;
+        ResourceDescription.Layout =
             D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
-        HRESULT hr = dx12.GetDevice()->CreateCommittedResource(
-            &heap,
+        HRESULT Result = dx12.GetDevice()->CreateCommittedResource(
+            &HeapProperties,
             D3D12_HEAP_FLAG_NONE,
-            &desc,
+            &ResourceDescription,
             D3D12_RESOURCE_STATE_GENERIC_READ,
             nullptr,
-            IID_PPV_ARGS(&m_IndexBuffer)
-        );
+            IID_PPV_ARGS(&IndexBuffer)
+        ); //Index Buffer作成結果
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
-        void* mapped = nullptr;
+        void* MappedData = nullptr; //Index BufferのCPU書込先
 
-        hr = m_IndexBuffer->Map(
+        Result = IndexBuffer->Map(
             0,
             nullptr,
-            &mapped
+            &MappedData
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
         std::memcpy(
-            mapped,
-            m_Indices.data(),
-            bufferSize
+            MappedData,
+            Indices.data(),
+            BufferSize
         );
 
-        m_IndexBuffer->Unmap(
+        IndexBuffer->Unmap(
             0,
             nullptr
         );
 
-        m_IndexBufferView.BufferLocation =
-            m_IndexBuffer->GetGPUVirtualAddress();
-        m_IndexBufferView.SizeInBytes =
-            bufferSize;
-        m_IndexBufferView.Format =
+        IndexBufferView.BufferLocation =
+            IndexBuffer->GetGPUVirtualAddress();
+        IndexBufferView.SizeInBytes =
+            BufferSize;
+        IndexBufferView.Format =
             DXGI_FORMAT_R32_UINT;
 
         return true;
-    }
-
-    bool OBJModel::CreateConstantBuffer(
-        DirectX12& dx12
-    )
-    {
-        const UINT bufferSize =
-            Align256(sizeof(OBJConstantBuffer));
-
-        D3D12_HEAP_PROPERTIES heap{};
-        heap.Type =
-            D3D12_HEAP_TYPE_UPLOAD;
-        heap.CPUPageProperty =
-            D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        heap.MemoryPoolPreference =
-            D3D12_MEMORY_POOL_UNKNOWN;
-        heap.CreationNodeMask = 1;
-        heap.VisibleNodeMask = 1;
-
-        D3D12_RESOURCE_DESC desc{};
-        desc.Dimension =
-            D3D12_RESOURCE_DIMENSION_BUFFER;
-        desc.Width = bufferSize;
-        desc.Height = 1;
-        desc.DepthOrArraySize = 1;
-        desc.MipLevels = 1;
-        desc.Format = DXGI_FORMAT_UNKNOWN;
-        desc.SampleDesc.Count = 1;
-        desc.Layout =
-            D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-        HRESULT hr = dx12.GetDevice()->CreateCommittedResource(
-            &heap,
-            D3D12_HEAP_FLAG_NONE,
-            &desc,
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&m_ConstantBuffer)
-        );
-
-        if (FAILED(hr))
-        {
-            return false;
-        }
-
-        hr = m_ConstantBuffer->Map(
-            0,
-            nullptr,
-            reinterpret_cast<void**>(&m_MappedConstantBuffer)
-        );
-
-        return SUCCEEDED(hr);
-    }
-
-    void OBJModel::SetPosition(
-        const DirectX::XMFLOAT3& position
-    )
-    {
-        m_Position = position;
-    }
-
-    void OBJModel::SetRotation(
-        const DirectX::XMFLOAT3& rotation
-    )
-    {
-        m_Rotation = rotation;
-    }
-
-    void OBJModel::SetScale(
-        const DirectX::XMFLOAT3& scale
-    )
-    {
-        m_Scale = scale;
     }
 
     void OBJModel::SetColor(
         const DirectX::XMFLOAT4& color
     )
     {
-        m_Color = color;
+        Color = color;
     }
 
+    //Modelの時間依存情報を更新する
+    //引数: deltaTime 前回更新からの秒数
     void OBJModel::Update(float deltaTime)
     {
         (void)deltaTime;
@@ -895,118 +1088,105 @@ float4 PSMain(VSOutput input) : SV_TARGET
 
     DirectX::XMMATRIX OBJModel::GetWorldMatrix() const
     {
-        using namespace DirectX;
-
-        XMMATRIX scale =
-            XMMatrixScaling(
-                m_Scale.x,
-                m_Scale.y,
-                m_Scale.z
-            );
-
-        XMMATRIX rotation =
-            XMMatrixRotationRollPitchYaw(
-                m_Rotation.x,
-                m_Rotation.y,
-                m_Rotation.z
-            );
-
-        XMMATRIX translation =
-            XMMatrixTranslation(
-                m_Position.x,
-                m_Position.y,
-                m_Position.z
-            );
-
-        return scale * rotation * translation;
+        const Object* Owner = GetOwner(); //Model Componentを所有するObject
+        return Owner != nullptr ? Owner->GetWorldMatrix() : DirectX::XMMatrixIdentity();
     }
 
-    void OBJModel::Draw(
-        DirectX12& dx12,
-        const Camera& camera
-    )
+    //現在のCameraでOBJ Modelを描画する
+    //引数: renderContext 描画基盤とCameraを持つContext
+    void OBJModel::Draw(const RenderContext& renderContext)
     {
-        if (!m_PipelineState)
+        if (!PipelineState)
             return;
 
-        if (!m_RootSignature)
+        if (!RootSignature)
             return;
 
-        if (m_Indices.empty())
+        if (Indices.empty())
             return;
 
-        ID3D12GraphicsCommandList* commandList =
-            dx12.GetCommandList();
+        DirectX12& Dx12 = renderContext.Graphics; //このpassで使用する描画基盤
+        const Camera& ViewCamera = renderContext.ViewCamera; //このpassで使用するCamera
+        ID3D12GraphicsCommandList* CommandList = Dx12.GetCommandList(); //描画命令の記録先
+
+        if (CommandList == nullptr || !VertexBuffer || !IndexBuffer ||
+            !Texture.IsValid())
+        {
+            return;
+        }
 
         using namespace DirectX;
 
-        XMMATRIX world =
-            GetWorldMatrix();
+        XMMATRIX World =
+            GetWorldMatrix(); //Owner ObjectのWorld行列
 
-        XMMATRIX viewProjection =
-            camera.GetViewProjectionMatrix();
+        XMMATRIX ViewProjection =
+            ViewCamera.GetViewProjectionMatrix(); //現在CameraのViewProjection行列
 
-        XMMATRIX wvp =
-            world * viewProjection;
+        XMMATRIX WorldViewProjection =
+            World * ViewProjection; //ModelのWVP行列
 
-        XMMATRIX transposed =
-            XMMatrixTranspose(wvp);
+        XMMATRIX TransposedWorldViewProjection =
+            XMMatrixTranspose(WorldViewProjection); //Shader転送用の転置済みWVP行列
 
+        OBJConstantBuffer RootConstants{}; //今回のCamera passだけで使用する描画定数
         XMStoreFloat4x4(
-            &m_MappedConstantBuffer->worldViewProjection,
-            transposed
+            &RootConstants.WorldViewProjection,
+            TransposedWorldViewProjection
         );
 
-        m_MappedConstantBuffer->color =
-            m_Color;
+        RootConstants.Color =
+            Color;
 
-        m_MappedConstantBuffer->useTexture =
-            m_UseTexture ? 1 : 0;
+        RootConstants.UseTexture =
+            UseTexture ? 1 : 0;
 
-        ID3D12DescriptorHeap* heaps[] =
+        ID3D12DescriptorHeap* DescriptorHeaps[] = //描画時に設定するTexture Heap
         {
-            m_Texture.GetSRVHeap()
+            Texture.GetSRVHeap()
         };
 
-        commandList->SetDescriptorHeaps(
+        CommandList->SetDescriptorHeaps(
             1,
-            heaps
+            DescriptorHeaps
         );
 
-        commandList->SetGraphicsRootSignature(
-            m_RootSignature.Get()
+        CommandList->SetGraphicsRootSignature(
+            RootSignature.Get()
         );
 
-        commandList->SetPipelineState(
-            m_PipelineState.Get()
+        CommandList->SetPipelineState(
+            PipelineState.Get()
         );
 
-        commandList->SetGraphicsRootConstantBufferView(
+        CommandList->SetGraphicsRoot32BitConstants(
             0,
-            m_ConstantBuffer->GetGPUVirtualAddress()
+            OBJRootConstantCount,
+            &RootConstants,
+            0
         );
 
-        commandList->SetGraphicsRootDescriptorTable(
+        CommandList->SetGraphicsRootDescriptorTable(
             1,
-            m_Texture.GetSRVGPUHandle()
+            Texture.GetSRVGPUHandle()
         );
 
-        commandList->IASetPrimitiveTopology(
+        CommandList->IASetPrimitiveTopology(
             D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST
         );
 
-        commandList->IASetVertexBuffers(
+        CommandList->IASetVertexBuffers(
             0,
             1,
-            &m_VertexBufferView
+            &VertexBufferView
         );
 
-        commandList->IASetIndexBuffer(
-            &m_IndexBufferView
+        CommandList->IASetIndexBuffer(
+            &IndexBufferView
         );
 
-        commandList->DrawIndexedInstanced(
-            static_cast<UINT>(m_Indices.size()),
+        CommandList->DrawIndexedInstanced(
+            static_cast<UINT>(Indices.size()),
             1,
             0,
             0,

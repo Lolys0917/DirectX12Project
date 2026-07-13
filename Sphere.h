@@ -1,24 +1,46 @@
+//|| Sphere.h ||::::::::::::::::::::::::::::::::
+//||
+//||  概要 ::::::::::::::::::::::::::::::::::::
+//||
+//||  UV球プリミティブオブジェクトを定義する
+//||
+//||  更新内容 ::::::::::::::::::::::::::::::::
+//||
+//||  2026_07_13  v2.00  PrimitiveObject階層とメッシュ生成を適用
+//||
+
 #pragma once
-#include "Object.h"
+
+#include <cstdint>
+#include <memory>
+
+#include "PrimitiveObject.h"
 
 namespace Engine
 {
-    class Sphere : public Object
+    class Sphere final : public PrimitiveObject
     {
     public:
+        //半径0.5のUV球を作成する
         Sphere();
-        virtual ~Sphere();
+
+        //球を破棄する
+        ~Sphere() override;
 
         void SetRadius(float radius);
-        void SetDivision(uint32_t slice, uint32_t stack);
+        void SetDivision(std::uint32_t slice, std::uint32_t stack);
+
+        //未登録状態の球定義を複製する
+        //戻り値 : 同じ半径、分割数、姿勢を持つ球
+        std::unique_ptr<Object> Clone() const override;
 
     protected:
-        virtual void BuildMesh() override;
+        //UV球メッシュを再構築する
+        void BuildMesh() override;
 
     private:
-        float m_Radius;
-
-        uint32_t m_Slice;
-        uint32_t m_Stack;
+        float Radius; //球半径
+        std::uint32_t Slice; //経度方向分割数
+        std::uint32_t Stack; //緯度方向分割数
     };
 }

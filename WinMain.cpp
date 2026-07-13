@@ -1,79 +1,340 @@
+//|| WinMain.cpp ||:::::::::::::::::::::::::::::
+//||
+//||  概要 :::::::::::::::::::::::::::::::::::::
+//||
+//||  Windows標準UI、固定FPS、Scene描画を接続するエントリーポイント
+//||
+//||  更新内容 :::::::::::::::::::::::::::::::::
+//||
+//||  2026_07_13  v2.10  編集: MessageLog表示、通常ログ消去、常設ログ及び操作ログを接続
+//||  2026_07_13  v2.00  Editor UIとStart、Stop、Tick、動的FPSを接続
+//||  2026_06_01  v1.00  新規作成
+//||
+
 #include <Windows.h>
-#include <chrono>
+#include <objbase.h>
 
-#include "WinApp.h"
+#include <cstdio>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <vector>
+
+#include "FrameRateController.h"
 #include "GameApp.h"
+#include "MessageLog.h"
+#include "WinApp.h"
 
+namespace
+{
+    /**
+     * UTF-8ログをWindows標準コントロール用UTF-16へ変換する
+     * @param text 変換するUTF-8文字列
+     * @return 変換済みUTF-16文字列、変換失敗時は代替メッセージ
+     */
+    std::wstring ConvertLogToWide(const std::string& text)
+    {
+        if (text.empty())
+        {
+            return std::wstring();
+        }
+
+        const int RequiredLength = MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            text.data(),
+            static_cast<int>(text.size()),
+            nullptr,
+            0
+        ); // UTF-16変換後に必要な文字数
+
+        if (RequiredLength <= 0)
+        {
+            return L"[Error] MessageLog | UTF-8ログの表示変換に失敗しました。";
+        }
+
+        std::wstring ConvertedText(
+            static_cast<std::size_t>(RequiredLength),
+            L'\0'
+        ); // Windows LISTBOXへ渡すUTF-16文字列
+        MultiByteToWideChar(
+            CP_UTF8,
+            MB_ERR_INVALID_CHARS,
+            text.data(),
+            static_cast<int>(text.size()),
+            ConvertedText.data(),
+            RequiredLength
+        );
+        return ConvertedText;
+    }
+
+    /**
+     * MessageLogの現在値を常設、通常の順でWindows UIへ反映する
+     * @param window ログ一覧を所有するEditor Window
+     * @param displayedRevision 最後に表示した更新番号
+     */
+    void RefreshLogDisplay(
+        Engine::WinApp& window,
+        std::uint64_t& displayedRevision
+    )
+    {
+        Engine::MessageLog& Log =
+            Engine::MessageLog::GetInstance(); // Process内で共有するログ管理器
+
+        if (displayedRevision == Log.GetRevision())
+        {
+            return;
+        }
+
+        const Engine::MessageLogSnapshot Snapshot =
+            Log.GetSnapshot(); // 同一更新時点の常設ログと通常ログ
+        std::vector<std::wstring> DisplayMessages; // LISTBOXへ表示するUTF-16ログ一覧
+        DisplayMessages.reserve(
+            Snapshot.PermanentLogs.size() + Snapshot.Logs.size()
+        );
+
+        for (const std::string& Message : Snapshot.PermanentLogs) // 消去対象外ログを先頭へ配置する
+        {
+            DisplayMessages.emplace_back(
+                L"[常設] " + ConvertLogToWide(Message)
+            );
+        }
+
+        for (const std::string& Message : Snapshot.Logs) // 通常ログを発生順に配置する
+        {
+            DisplayMessages.emplace_back(ConvertLogToWide(Message));
+        }
+
+        window.UpdateLogMessages(DisplayMessages);
+        displayedRevision = Snapshot.Revision;
+    }
+}
+
+//Windows標準Editor UIとEngineを起動してMessage Loopを実行する
+//引数: hInstance 実行Module、hPrevInstance 未使用の旧Instance、commandLine Command Line、showCommand 初期表示方法
+//戻り値: 正常終了時は0、初期化失敗時は-1
 int WINAPI WinMain(
     HINSTANCE hInstance,
     HINSTANCE hPrevInstance,
-    LPSTR lpCmdLine,
-    int nCmdShow
+    LPSTR commandLine,
+    int showCommand
 )
 {
     (void)hInstance;
     (void)hPrevInstance;
-    (void)lpCmdLine;
-    (void)nCmdShow;
+    (void)commandLine;
+    (void)showCommand;
 
-    constexpr uint32_t WindowWidth = 1280;
-    constexpr uint32_t WindowHeight = 720;
+    constexpr uint32_t WindowWidth = 1280; //Editor親Windowの初期クライアント幅
+    constexpr uint32_t WindowHeight = 720; //Editor親Windowの初期クライアント高さ
 
-    Engine::WinApp winApp;
+    Engine::MessageLog& Log =
+        Engine::MessageLog::GetInstance(); // Engine全体で共有するMessage Log
+    Log.AddPermanentLog(
+        "DirectX 12 Component Engine | Permanent logs are excluded from Clear Logs."
+    );
+    Log.AddPermanentLog(
+        "ViewScene | The selected scene and every camera keep their own RenderTexture."
+    );
 
-    if (!winApp.Create(
-        L"DirectX12 Engine",
+    if (!SetProcessDpiAwarenessContext(
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) &&
+        GetLastError() != ERROR_ACCESS_DENIED)
+    {
+        Log.AddLog(
+            "[Warning] WinMain | Per-monitor DPI awareness could not be enabled."
+        );
+    }
+
+    const HRESULT ComResult = CoInitializeEx(
+        nullptr,
+        COINIT_APARTMENTTHREADED
+    ); //WICとWindows UIリソースで共有するCOM初期化結果
+
+    const bool MustUninitializeCom =
+        ComResult == S_OK || ComResult == S_FALSE; //この関数がCOM解放を担当する場合はtrue
+
+    if (FAILED(ComResult))
+    {
+        Log.AddLog(
+            "[Warning] WinMain | COM initialization failed; WIC image loading may be unavailable."
+        );
+    }
+
+    Engine::WinApp Window; //Windows標準コントロールを所有するEditor Window
+
+    if (!Window.Create(
+        L"DirectX 12 Component Engine",
         WindowWidth,
         WindowHeight))
     {
-        MessageBoxA(
-            nullptr,
-            "Window Create Failed",
-            "Error",
-            MB_OK
+        Log.AddPermanentLog(
+            "[Critical] WinMain | Editor Window creation failed."
         );
+        MessageBoxW(
+            nullptr,
+            L"Editor Windowの作成に失敗しました。",
+            L"DirectX 12 Engine",
+            MB_OK | MB_ICONERROR
+        );
+
+        if (MustUninitializeCom)
+        {
+            CoUninitialize();
+        }
 
         return -1;
     }
 
-    Engine::GameApp gameApp;
+	Engine::WindowsUISettings UISettings; // Windows標準UIの既定設定
+	UISettings.TexturePath = L"c_1576721479650-1-2.jpg";
 
-    if (!gameApp.Initialize(
-        winApp.GetHWND(),
-        winApp.GetWidth(),
-        winApp.GetHeight()))
+	Window.SetUISettings(UISettings);
+
+    Log.AddLog("[Info] WinMain | Editor Window created.");
+
+    Engine::GameApp Application; //Sceneと描画基盤を所有するゲームアプリケーション
+
+    if (!Application.Initialize(
+        Window.GetRenderHwnd(),
+        Window.GetRenderWidth(),
+        Window.GetRenderHeight()))
     {
-        MessageBoxA(
-            nullptr,
-            "GameApp Initialize Failed",
-            "Error",
-            MB_OK
+        Log.AddPermanentLog(
+            "[Critical] WinMain | DirectX 12 or DefaultScene initialization failed."
         );
+        MessageBoxW(
+            Window.GetHWND(),
+            L"DirectX 12または既定Sceneの初期化に失敗しました。",
+            L"DirectX 12 Engine",
+            MB_OK | MB_ICONERROR
+        );
+
+        Window.Destroy();
+
+        if (MustUninitializeCom)
+        {
+            CoUninitialize();
+        }
 
         return -1;
     }
 
-    auto previousTime =
-        std::chrono::high_resolution_clock::now();
+    Engine::FrameRateController FrameRate; //再生状態と固定更新間隔の管理器
+    FrameRate.SetTargetFrameRate(Window.GetTargetFrameRate());
 
-    while (winApp.ProcessMessage())
+    bool NeedsDraw = true; //Scene出力を再描画する必要がある場合はtrue
+    std::uint64_t DisplayedLogRevision =
+        (std::numeric_limits<std::uint64_t>::max)(); // UIへ最後に反映したログ更新番号
+    RefreshLogDisplay(Window, DisplayedLogRevision);
+
+    while (Window.ProcessMessage())
     {
-        auto currentTime =
-            std::chrono::high_resolution_clock::now();
+        if (Window.ConsumeClearLogs())
+        {
+            Log.ClearLogs();
+            Log.AddLog(
+                "[Info] MessageLog | Clear Logs removed all non-permanent entries."
+            );
+        }
 
-        std::chrono::duration<float> elapsed =
-            currentTime - previousTime;
+        if (Window.ConsumeStart())
+        {
+            FrameRate.Start();
+            Log.AddLog("[Info] Playback | Start requested.");
+        }
 
-        previousTime = currentTime;
+        if (Window.ConsumeStop())
+        {
+            FrameRate.Stop();
+            Log.AddLog("[Info] Playback | Stop requested.");
+        }
 
-        float deltaTime = elapsed.count();
+        if (Window.ConsumeTick())
+        {
+            FrameRate.RequestTick();
+            Log.AddLog("[Info] Playback | Single-frame Tick requested.");
+        }
 
-        gameApp.Update(deltaTime);
-        gameApp.Draw();
+        const uint32_t RequestedFrameRate =
+            Window.GetTargetFrameRate(); //EditまたはTrackbarで選択された最新FPS
+
+        if (RequestedFrameRate != FrameRate.GetTargetFrameRate())
+        {
+            FrameRate.SetTargetFrameRate(RequestedFrameRate);
+
+            char FrameRateMessage[128]{}; // 変更後FPSを表示する操作ログ
+            sprintf_s(
+                FrameRateMessage,
+                "[Info] Playback | Target frame rate changed to %u FPS.",
+                RequestedFrameRate
+            );
+            Log.AddLog(FrameRateMessage);
+        }
+
+        Engine::RenderWindowSize RenderSize{}; //未処理のviewportサイズ変更
+
+        if (Window.ConsumeResize(RenderSize))
+        {
+            if (!Application.Resize(RenderSize.Width, RenderSize.Height))
+            {
+                Log.AddPermanentLog(
+                    "[Critical] WinMain | Render viewport Resize failed; execution was stopped."
+                );
+                MessageBoxW(
+                    Window.GetHWND(),
+                    L"描画領域のサイズ変更に失敗しました。",
+                    L"DirectX 12 Engine",
+                    MB_OK | MB_ICONERROR
+                );
+
+                break;
+            }
+
+            NeedsDraw = true;
+        }
+
+        float DeltaTime = 0.0f; //今回の固定Updateに使用する秒数
+
+        if (FrameRate.TryConsumeStep(DeltaTime))
+        {
+            Application.Update(DeltaTime);
+            NeedsDraw = true;
+        }
+
+        if (NeedsDraw)
+        {
+            Application.Draw();
+            NeedsDraw = false;
+        }
+
+        RefreshLogDisplay(Window, DisplayedLogRevision);
+
+        const DWORD WaitResult = MsgWaitForMultipleObjectsEx(
+            0,
+            nullptr,
+            FrameRate.GetWaitMilliseconds(),
+            QS_ALLINPUT,
+            MWMO_INPUTAVAILABLE
+        ); // 次の更新時刻又はWindows Messageを待つ結果
+
+        if (WaitResult == WAIT_FAILED)
+        {
+            Log.AddPermanentLog(
+                "[Critical] WinMain | Waiting for Windows messages failed."
+            );
+            RefreshLogDisplay(Window, DisplayedLogRevision);
+            break;
+        }
     }
 
-    gameApp.Finalize();
-    winApp.Destroy();
+    Application.Finalize();
+    Window.Destroy();
+
+    if (MustUninitializeCom)
+    {
+        CoUninitialize();
+    }
 
     return 0;
 }

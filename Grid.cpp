@@ -1,7 +1,22 @@
+//|| Grid.cpp ||::::::::::::::::::::::::::::::::
+//||
+//||  概要 :::::::::::::::::::::::::::::::::::::
+//||
+//||  各Camera passへデバッグ用Gridを描画するComponentを実装する
+//||
+//||  更新内容 :::::::::::::::::::::::::::::::::
+//||
+//||  2026_07_13  v2.20  Camera pass別WVPをRoot Constantsへ変更
+//||  2026_07_13  v2.10  C++変数命名と宣言コメントを規則へ統一
+//||  2026_07_13  v2.00  Component化し固定Camera依存を削除
+//||  2026_06_01  v1.00  新規作成
+//||
+
 #include "Grid.h"
 
 #include "DirectX12.h"
 #include "Camera.h"
+#include "RenderContext.h"
 
 #include <d3dcompiler.h>
 #include <cstring>
@@ -12,10 +27,9 @@ namespace Engine
 {
     namespace
     {
-        UINT Align256(UINT size)
-        {
-            return (size + 255) & ~255;
-        }
+        constexpr UINT GridRootConstantCount = 16; //WVP行列を構成する32bit値数
+        static_assert(sizeof(GridConstantBuffer) ==
+            sizeof(UINT) * GridRootConstantCount);
 
         const char* GridShaderCode = R"(
 
@@ -53,30 +67,39 @@ float4 PSMain(VSOutput input) : SV_TARGET
     return input.color;
 }
 
-)";
+)"; //Grid描画用HLSL Source
     }
 
+    //未登録状態のGrid Componentを作成する
     Grid::Grid()
-        : m_Camera(nullptr)
-        , m_VertexBufferView{}
-        , m_MappedConstantBuffer(nullptr)
+        : Component(StaticType)
+        , VertexBufferView{}
     {
     }
 
+    //Grid Componentを破棄する
     Grid::~Grid()
     {
-        if (m_ConstantBuffer && m_MappedConstantBuffer)
-        {
-            m_ConstantBuffer->Unmap(0, nullptr);
-            m_MappedConstantBuffer = nullptr;
-        }
+        Finalize();
     }
 
-    void Grid::SetCamera(Camera* camera)
+    //Gridの終了処理を行う
+    void Grid::Finalize()
     {
-        m_Camera = camera;
     }
 
+    //未登録状態のGrid定義を複製する
+    //戻り値: GPU Resourceを持たない複製Component
+    std::unique_ptr<Component> Grid::Clone() const
+    {
+        auto Duplicate = std::make_unique<Grid>(); //未登録の複製Grid
+        CopyDefinitionTo(*Duplicate);
+        return Duplicate;
+    }
+
+    //Grid用GPU Resourceを作成する
+    //引数: dx12 描画基盤
+    //戻り値: 全Resource作成に成功した場合はtrue
     bool Grid::Initialize(DirectX12& dx12)
     {
         BuildGrid();
@@ -84,105 +107,111 @@ float4 PSMain(VSOutput input) : SV_TARGET
         if (!CreateRootSignature(dx12)) return false;
         if (!CreatePipelineState(dx12)) return false;
         if (!CreateVertexBuffer(dx12)) return false;
-        if (!CreateConstantBuffer(dx12)) return false;
 
         return true;
     }
 
+    //Gridの時間依存情報を更新する
+    //引数: deltaTime 前回更新からの秒数
     void Grid::Update(float deltaTime)
     {
         (void)deltaTime;
     }
 
-    void Grid::Draw(DirectX12& dx12)
+    //RenderContextのCameraでGridを描画する
+    //引数: renderContext 描画基盤と現在のCamera
+    void Grid::Draw(const RenderContext& renderContext)
     {
-        if (!m_Camera)
+        if (!PipelineState)
             return;
 
-        if (!m_PipelineState)
+        if (!RootSignature)
             return;
 
-        if (!m_RootSignature)
-            return;
-
-        ID3D12GraphicsCommandList* commandList =
-            dx12.GetCommandList();
+        DirectX12& Dx12 = renderContext.Graphics; //このpassで使用する描画基盤
+        const Camera& ViewCamera = renderContext.ViewCamera; //このpassで使用するCamera
+        ID3D12GraphicsCommandList* CommandList =
+            Dx12.GetCommandList(); //描画命令の記録先
 
         using namespace DirectX;
 
-        XMMATRIX world =
-            XMMatrixIdentity();
+        XMMATRIX World =
+            XMMatrixIdentity(); //GridのWorld行列
 
-        XMMATRIX viewProjection =
-            m_Camera->GetViewProjectionMatrix();
+        XMMATRIX ViewProjection =
+            ViewCamera.GetViewProjectionMatrix(); //現在CameraのViewProjection行列
 
-        XMMATRIX wvp =
-            world * viewProjection;
+        XMMATRIX WorldViewProjection =
+            World * ViewProjection; //GridのWVP行列
 
-        XMMATRIX transposed =
-            XMMatrixTranspose(wvp);
+        XMMATRIX TransposedWorldViewProjection =
+            XMMatrixTranspose(WorldViewProjection); //Shader転送用の転置済みWVP行列
 
+        GridConstantBuffer RootConstants{}; //今回のCamera passだけで使用する描画定数
         XMStoreFloat4x4(
-            &m_MappedConstantBuffer->worldViewProjection,
-            transposed
+            &RootConstants.WorldViewProjection,
+            TransposedWorldViewProjection
         );
 
-        commandList->SetGraphicsRootSignature(
-            m_RootSignature.Get()
+        CommandList->SetGraphicsRootSignature(
+            RootSignature.Get()
         );
 
-        commandList->SetPipelineState(
-            m_PipelineState.Get()
+        CommandList->SetPipelineState(
+            PipelineState.Get()
         );
 
-        commandList->SetGraphicsRootConstantBufferView(
+        CommandList->SetGraphicsRoot32BitConstants(
             0,
-            m_ConstantBuffer->GetGPUVirtualAddress()
+            GridRootConstantCount,
+            &RootConstants,
+            0
         );
 
-        commandList->IASetPrimitiveTopology(
+        CommandList->IASetPrimitiveTopology(
             D3D_PRIMITIVE_TOPOLOGY_LINELIST
         );
 
-        commandList->IASetVertexBuffers(
+        CommandList->IASetVertexBuffers(
             0,
             1,
-            &m_VertexBufferView
+            &VertexBufferView
         );
 
-        commandList->DrawInstanced(
-            static_cast<UINT>(m_Vertices.size()),
+        CommandList->DrawInstanced(
+            static_cast<UINT>(Vertices.size()),
             1,
             0,
             0
         );
     }
 
+    //デバッグ表示用GridのLine List頂点を構築する
     void Grid::BuildGrid()
     {
-        m_Vertices.clear();
+        Vertices.clear();
 
-        const float halfSize = 5.0f;
+        const float HalfSize = 5.0f; //Gridの中心から端までの長さ
 
-        const DirectX::XMFLOAT4 black =
+        const DirectX::XMFLOAT4 Black =
         {
             0.0f, 0.0f, 0.0f, 1.0f
-        };
+        }; //通常Grid線の色
 
-        const DirectX::XMFLOAT4 red =
+        const DirectX::XMFLOAT4 Red =
         {
             1.0f, 0.0f, 0.0f, 1.0f
-        };
+        }; //X軸線の色
 
-        const DirectX::XMFLOAT4 green =
+        const DirectX::XMFLOAT4 Green =
         {
             0.0f, 1.0f, 0.0f, 1.0f
-        };
+        }; //Y軸線の色
 
-        const DirectX::XMFLOAT4 blue =
+        const DirectX::XMFLOAT4 Blue =
         {
             0.0f, 0.0f, 1.0f, 1.0f
-        };
+        }; //Z軸線の色
 
         auto AddLine =
             [this](
@@ -190,124 +219,131 @@ float4 PSMain(VSOutput input) : SV_TARGET
                 const DirectX::XMFLOAT3& end,
                 const DirectX::XMFLOAT4& color)
             {
-                GridVertex v0{};
-                v0.position = start;
-                v0.color = color;
+                GridVertex Vertex0{}; //線分の始点頂点
+                Vertex0.Position = start;
+                Vertex0.Color = color;
 
-                GridVertex v1{};
-                v1.position = end;
-                v1.color = color;
+                GridVertex Vertex1{}; //線分の終点頂点
+                Vertex1.Position = end;
+                Vertex1.Color = color;
 
-                m_Vertices.push_back(v0);
-                m_Vertices.push_back(v1);
-            };
+                Vertices.push_back(Vertex0);
+                Vertices.push_back(Vertex1);
+            }; //線分をLine Listへ追加する処理
 
         /*
-            X-Z���ʂ�10�~10�O���b�h
+            X-Z平面の10×10グリッド
 
-            �͈́F
-                X = -5 �` +5
-                Z = -5 �` +5
+            範囲：
+                X = -5 ～ +5
+                Z = -5 ～ +5
 
-            10�}�X��邽�߁A����11�{���B
+            10マス作るため、線は11本ずつ。
         */
-        for (int i = -5; i <= 5; ++i)
+        for (int Index = -5; Index <= 5; ++Index) //X軸とZ軸の平行線を生成する
         {
-            const float p = static_cast<float>(i);
+            const float GridPosition = static_cast<float>(Index); //現在線の軸上位置
 
             /*
-                X�����̐�
+                X方向の線
 
-                z = 0 �̐���X���Ƃ��ĐԂɂ���B
+                z = 0 の線をX軸として赤にする。
             */
             AddLine(
-                DirectX::XMFLOAT3(-halfSize, 0.0f, p),
-                DirectX::XMFLOAT3(halfSize, 0.0f, p),
-                i == 0 ? red : black
+                DirectX::XMFLOAT3(-HalfSize, 0.0f, GridPosition),
+                DirectX::XMFLOAT3(HalfSize, 0.0f, GridPosition),
+                Index == 0 ? Red : Black
             );
 
             /*
-                Z�����̐�
+                Z方向の線
 
-                x = 0 �̐���Z���Ƃ��Đɂ���B
+                x = 0 の線をZ軸として青にする。
             */
             AddLine(
-                DirectX::XMFLOAT3(p, 0.0f, -halfSize),
-                DirectX::XMFLOAT3(p, 0.0f, halfSize),
-                i == 0 ? blue : black
+                DirectX::XMFLOAT3(GridPosition, 0.0f, -HalfSize),
+                DirectX::XMFLOAT3(GridPosition, 0.0f, HalfSize),
+                Index == 0 ? Blue : Black
             );
         }
 
         /*
-            Y��
+            Y軸
 
-            �n�ʂ��������ɐL�т�ΐ��B
+            地面から上方向に伸びる緑線。
         */
         AddLine(
             DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f),
             DirectX::XMFLOAT3(0.0f, 5.0f, 0.0f),
-            green
+            Green
         );
     }
 
+    //Grid描画用RootSignatureを作成する
+    //引数: dx12 描画基盤
+    //戻り値: 作成に成功した場合はtrue
     bool Grid::CreateRootSignature(DirectX12& dx12)
     {
-        D3D12_ROOT_PARAMETER rootParameter{};
-        rootParameter.ParameterType =
-            D3D12_ROOT_PARAMETER_TYPE_CBV;
-        rootParameter.Descriptor.ShaderRegister = 0;
-        rootParameter.Descriptor.RegisterSpace = 0;
-        rootParameter.ShaderVisibility =
+        D3D12_ROOT_PARAMETER RootParameter{}; //WVP Root Constants用Parameter
+        RootParameter.ParameterType =
+            D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+        RootParameter.Constants.ShaderRegister = 0;
+        RootParameter.Constants.RegisterSpace = 0;
+        RootParameter.Constants.Num32BitValues = GridRootConstantCount;
+        RootParameter.ShaderVisibility =
             D3D12_SHADER_VISIBILITY_VERTEX;
 
-        D3D12_ROOT_SIGNATURE_DESC desc{};
-        desc.NumParameters = 1;
-        desc.pParameters = &rootParameter;
-        desc.NumStaticSamplers = 0;
-        desc.pStaticSamplers = nullptr;
-        desc.Flags =
+        D3D12_ROOT_SIGNATURE_DESC Description{}; //RootSignature設定
+        Description.NumParameters = 1;
+        Description.pParameters = &RootParameter;
+        Description.NumStaticSamplers = 0;
+        Description.pStaticSamplers = nullptr;
+        Description.Flags =
             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
-        Microsoft::WRL::ComPtr<ID3DBlob> signature;
-        Microsoft::WRL::ComPtr<ID3DBlob> error;
+        Microsoft::WRL::ComPtr<ID3DBlob> Signature; //Serialize済みRootSignature
+        Microsoft::WRL::ComPtr<ID3DBlob> Error; //Serialize失敗内容
 
-        HRESULT hr = D3D12SerializeRootSignature(
-            &desc,
+        HRESULT Result = D3D12SerializeRootSignature(
+            &Description,
             D3D_ROOT_SIGNATURE_VERSION_1,
-            &signature,
-            &error
-        );
+            &Signature,
+            &Error
+        ); //RootSignatureのSerialize結果
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
-        hr = dx12.GetDevice()->CreateRootSignature(
+        Result = dx12.GetDevice()->CreateRootSignature(
             0,
-            signature->GetBufferPointer(),
-            signature->GetBufferSize(),
-            IID_PPV_ARGS(&m_RootSignature)
+            Signature->GetBufferPointer(),
+            Signature->GetBufferSize(),
+            IID_PPV_ARGS(&RootSignature)
         );
 
-        return SUCCEEDED(hr);
+        return SUCCEEDED(Result);
     }
 
+    //Grid描画用PipelineStateを作成する
+    //引数: dx12 描画基盤
+    //戻り値: 作成に成功した場合はtrue
     bool Grid::CreatePipelineState(DirectX12& dx12)
     {
-        Microsoft::WRL::ComPtr<ID3DBlob> vsBlob;
-        Microsoft::WRL::ComPtr<ID3DBlob> psBlob;
-        Microsoft::WRL::ComPtr<ID3DBlob> errorBlob;
+        Microsoft::WRL::ComPtr<ID3DBlob> VertexShaderBlob; //Compile済みVertex Shader
+        Microsoft::WRL::ComPtr<ID3DBlob> PixelShaderBlob; //Compile済みPixel Shader
+        Microsoft::WRL::ComPtr<ID3DBlob> ErrorBlob; //Shader Compile失敗内容
 
-        UINT compileFlags = 0;
+        UINT CompileFlags = 0; //Shader Compile Option
 
 #if defined(_DEBUG)
-        compileFlags =
+        CompileFlags =
             D3DCOMPILE_DEBUG |
             D3DCOMPILE_SKIP_OPTIMIZATION;
 #endif
 
-        HRESULT hr = D3DCompile(
+        HRESULT Result = D3DCompile(
             GridShaderCode,
             std::strlen(GridShaderCode),
             nullptr,
@@ -315,18 +351,18 @@ float4 PSMain(VSOutput input) : SV_TARGET
             nullptr,
             "VSMain",
             "vs_5_0",
-            compileFlags,
+            CompileFlags,
             0,
-            &vsBlob,
-            &errorBlob
-        );
+            &VertexShaderBlob,
+            &ErrorBlob
+        ); //Vertex Shader Compile結果
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
-        hr = D3DCompile(
+        Result = D3DCompile(
             GridShaderCode,
             std::strlen(GridShaderCode),
             nullptr,
@@ -334,254 +370,205 @@ float4 PSMain(VSOutput input) : SV_TARGET
             nullptr,
             "PSMain",
             "ps_5_0",
-            compileFlags,
+            CompileFlags,
             0,
-            &psBlob,
-            &errorBlob
+            &PixelShaderBlob,
+            &ErrorBlob
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
-        D3D12_INPUT_ELEMENT_DESC inputLayout[2]{};
+        D3D12_INPUT_ELEMENT_DESC InputLayout[2]{}; //PositionとColorの頂点入力定義
 
-        inputLayout[0].SemanticName = "POSITION";
-        inputLayout[0].SemanticIndex = 0;
-        inputLayout[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
-        inputLayout[0].InputSlot = 0;
-        inputLayout[0].AlignedByteOffset = 0;
-        inputLayout[0].InputSlotClass =
+        InputLayout[0].SemanticName = "POSITION";
+        InputLayout[0].SemanticIndex = 0;
+        InputLayout[0].Format = DXGI_FORMAT_R32G32B32_FLOAT;
+        InputLayout[0].InputSlot = 0;
+        InputLayout[0].AlignedByteOffset = 0;
+        InputLayout[0].InputSlotClass =
             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
-        inputLayout[0].InstanceDataStepRate = 0;
+        InputLayout[0].InstanceDataStepRate = 0;
 
-        inputLayout[1].SemanticName = "COLOR";
-        inputLayout[1].SemanticIndex = 0;
-        inputLayout[1].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-        inputLayout[1].InputSlot = 0;
-        inputLayout[1].AlignedByteOffset = 12;
-        inputLayout[1].InputSlotClass =
+        InputLayout[1].SemanticName = "COLOR";
+        InputLayout[1].SemanticIndex = 0;
+        InputLayout[1].Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+        InputLayout[1].InputSlot = 0;
+        InputLayout[1].AlignedByteOffset = 12;
+        InputLayout[1].InputSlotClass =
             D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA;
-        inputLayout[1].InstanceDataStepRate = 0;
+        InputLayout[1].InstanceDataStepRate = 0;
 
-        D3D12_GRAPHICS_PIPELINE_STATE_DESC psoDesc{};
-        psoDesc.pRootSignature = m_RootSignature.Get();
+        D3D12_GRAPHICS_PIPELINE_STATE_DESC PipelineDescription{}; //Grid描画Pipeline設定
+        PipelineDescription.pRootSignature = RootSignature.Get();
 
-        psoDesc.VS.pShaderBytecode =
-            vsBlob->GetBufferPointer();
-        psoDesc.VS.BytecodeLength =
-            vsBlob->GetBufferSize();
+        PipelineDescription.VS.pShaderBytecode =
+            VertexShaderBlob->GetBufferPointer();
+        PipelineDescription.VS.BytecodeLength =
+            VertexShaderBlob->GetBufferSize();
 
-        psoDesc.PS.pShaderBytecode =
-            psBlob->GetBufferPointer();
-        psoDesc.PS.BytecodeLength =
-            psBlob->GetBufferSize();
+        PipelineDescription.PS.pShaderBytecode =
+            PixelShaderBlob->GetBufferPointer();
+        PipelineDescription.PS.BytecodeLength =
+            PixelShaderBlob->GetBufferSize();
 
-        psoDesc.InputLayout.pInputElementDescs =
-            inputLayout;
-        psoDesc.InputLayout.NumElements = 2;
+        PipelineDescription.InputLayout.pInputElementDescs =
+            InputLayout;
+        PipelineDescription.InputLayout.NumElements = 2;
 
-        psoDesc.PrimitiveTopologyType =
+        PipelineDescription.PrimitiveTopologyType =
             D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
 
-        psoDesc.NumRenderTargets = 1;
-        psoDesc.RTVFormats[0] =
+        PipelineDescription.NumRenderTargets = 1;
+        PipelineDescription.RTVFormats[0] =
             dx12.GetBackBufferFormat();
 
-        psoDesc.DSVFormat =
+        PipelineDescription.DSVFormat =
             dx12.GetDepthStencilFormat();
 
-        psoDesc.SampleDesc.Count = 1;
-        psoDesc.SampleDesc.Quality = 0;
-        psoDesc.SampleMask = UINT_MAX;
+        PipelineDescription.SampleDesc.Count = 1;
+        PipelineDescription.SampleDesc.Quality = 0;
+        PipelineDescription.SampleMask = UINT_MAX;
 
-        psoDesc.RasterizerState.FillMode =
+        PipelineDescription.RasterizerState.FillMode =
             D3D12_FILL_MODE_SOLID;
-        psoDesc.RasterizerState.CullMode =
+        PipelineDescription.RasterizerState.CullMode =
             D3D12_CULL_MODE_NONE;
-        psoDesc.RasterizerState.FrontCounterClockwise = FALSE;
-        psoDesc.RasterizerState.DepthBias =
+        PipelineDescription.RasterizerState.FrontCounterClockwise = FALSE;
+        PipelineDescription.RasterizerState.DepthBias =
             D3D12_DEFAULT_DEPTH_BIAS;
-        psoDesc.RasterizerState.DepthBiasClamp =
+        PipelineDescription.RasterizerState.DepthBiasClamp =
             D3D12_DEFAULT_DEPTH_BIAS_CLAMP;
-        psoDesc.RasterizerState.SlopeScaledDepthBias =
+        PipelineDescription.RasterizerState.SlopeScaledDepthBias =
             D3D12_DEFAULT_SLOPE_SCALED_DEPTH_BIAS;
-        psoDesc.RasterizerState.DepthClipEnable = TRUE;
-        psoDesc.RasterizerState.MultisampleEnable = FALSE;
-        psoDesc.RasterizerState.AntialiasedLineEnable = FALSE;
-        psoDesc.RasterizerState.ForcedSampleCount = 0;
-        psoDesc.RasterizerState.ConservativeRaster =
+        PipelineDescription.RasterizerState.DepthClipEnable = TRUE;
+        PipelineDescription.RasterizerState.MultisampleEnable = FALSE;
+        PipelineDescription.RasterizerState.AntialiasedLineEnable = FALSE;
+        PipelineDescription.RasterizerState.ForcedSampleCount = 0;
+        PipelineDescription.RasterizerState.ConservativeRaster =
             D3D12_CONSERVATIVE_RASTERIZATION_MODE_OFF;
 
-        psoDesc.BlendState.AlphaToCoverageEnable = FALSE;
-        psoDesc.BlendState.IndependentBlendEnable = FALSE;
+        PipelineDescription.BlendState.AlphaToCoverageEnable = FALSE;
+        PipelineDescription.BlendState.IndependentBlendEnable = FALSE;
 
-        D3D12_RENDER_TARGET_BLEND_DESC blendDesc{};
-        blendDesc.BlendEnable = FALSE;
-        blendDesc.LogicOpEnable = FALSE;
-        blendDesc.SrcBlend = D3D12_BLEND_ONE;
-        blendDesc.DestBlend = D3D12_BLEND_ZERO;
-        blendDesc.BlendOp = D3D12_BLEND_OP_ADD;
-        blendDesc.SrcBlendAlpha = D3D12_BLEND_ONE;
-        blendDesc.DestBlendAlpha = D3D12_BLEND_ZERO;
-        blendDesc.BlendOpAlpha = D3D12_BLEND_OP_ADD;
-        blendDesc.LogicOp = D3D12_LOGIC_OP_NOOP;
-        blendDesc.RenderTargetWriteMask =
+        D3D12_RENDER_TARGET_BLEND_DESC BlendDescription{}; //単一RenderTargetのBlend設定
+        BlendDescription.BlendEnable = FALSE;
+        BlendDescription.LogicOpEnable = FALSE;
+        BlendDescription.SrcBlend = D3D12_BLEND_ONE;
+        BlendDescription.DestBlend = D3D12_BLEND_ZERO;
+        BlendDescription.BlendOp = D3D12_BLEND_OP_ADD;
+        BlendDescription.SrcBlendAlpha = D3D12_BLEND_ONE;
+        BlendDescription.DestBlendAlpha = D3D12_BLEND_ZERO;
+        BlendDescription.BlendOpAlpha = D3D12_BLEND_OP_ADD;
+        BlendDescription.LogicOp = D3D12_LOGIC_OP_NOOP;
+        BlendDescription.RenderTargetWriteMask =
             D3D12_COLOR_WRITE_ENABLE_ALL;
 
-        psoDesc.BlendState.RenderTarget[0] = blendDesc;
+        PipelineDescription.BlendState.RenderTarget[0] = BlendDescription;
 
-        psoDesc.DepthStencilState.DepthEnable = TRUE;
-        psoDesc.DepthStencilState.DepthWriteMask =
+        PipelineDescription.DepthStencilState.DepthEnable = TRUE;
+        PipelineDescription.DepthStencilState.DepthWriteMask =
             D3D12_DEPTH_WRITE_MASK_ALL;
-        psoDesc.DepthStencilState.DepthFunc =
+        PipelineDescription.DepthStencilState.DepthFunc =
             D3D12_COMPARISON_FUNC_LESS_EQUAL;
-        psoDesc.DepthStencilState.StencilEnable = FALSE;
+        PipelineDescription.DepthStencilState.StencilEnable = FALSE;
 
-        psoDesc.IBStripCutValue =
+        PipelineDescription.IBStripCutValue =
             D3D12_INDEX_BUFFER_STRIP_CUT_VALUE_DISABLED;
 
-        hr = dx12.GetDevice()->CreateGraphicsPipelineState(
-            &psoDesc,
-            IID_PPV_ARGS(&m_PipelineState)
+        Result = dx12.GetDevice()->CreateGraphicsPipelineState(
+            &PipelineDescription,
+            IID_PPV_ARGS(&PipelineState)
         );
 
-        return SUCCEEDED(hr);
+        return SUCCEEDED(Result);
     }
 
+    //Grid頂点Bufferを作成する
+    //引数: dx12 描画基盤
+    //戻り値: 作成に成功した場合はtrue
     bool Grid::CreateVertexBuffer(DirectX12& dx12)
     {
-        const UINT bufferSize =
+        const UINT BufferSize =
             static_cast<UINT>(
-                sizeof(GridVertex) * m_Vertices.size()
-                );
+                sizeof(GridVertex) * Vertices.size()
+                ); //頂点BufferのByte数
 
-        D3D12_HEAP_PROPERTIES heapProps{};
-        heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-        heapProps.CPUPageProperty =
+        D3D12_HEAP_PROPERTIES HeapProperties{}; //Upload Heap設定
+        HeapProperties.Type = D3D12_HEAP_TYPE_UPLOAD;
+        HeapProperties.CPUPageProperty =
             D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        heapProps.MemoryPoolPreference =
+        HeapProperties.MemoryPoolPreference =
             D3D12_MEMORY_POOL_UNKNOWN;
-        heapProps.CreationNodeMask = 1;
-        heapProps.VisibleNodeMask = 1;
+        HeapProperties.CreationNodeMask = 1;
+        HeapProperties.VisibleNodeMask = 1;
 
-        D3D12_RESOURCE_DESC resourceDesc{};
-        resourceDesc.Dimension =
+        D3D12_RESOURCE_DESC ResourceDescription{}; //頂点Buffer Resource設定
+        ResourceDescription.Dimension =
             D3D12_RESOURCE_DIMENSION_BUFFER;
-        resourceDesc.Alignment = 0;
-        resourceDesc.Width = bufferSize;
-        resourceDesc.Height = 1;
-        resourceDesc.DepthOrArraySize = 1;
-        resourceDesc.MipLevels = 1;
-        resourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-        resourceDesc.SampleDesc.Count = 1;
-        resourceDesc.SampleDesc.Quality = 0;
-        resourceDesc.Layout =
+        ResourceDescription.Alignment = 0;
+        ResourceDescription.Width = BufferSize;
+        ResourceDescription.Height = 1;
+        ResourceDescription.DepthOrArraySize = 1;
+        ResourceDescription.MipLevels = 1;
+        ResourceDescription.Format = DXGI_FORMAT_UNKNOWN;
+        ResourceDescription.SampleDesc.Count = 1;
+        ResourceDescription.SampleDesc.Quality = 0;
+        ResourceDescription.Layout =
             D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-        resourceDesc.Flags =
+        ResourceDescription.Flags =
             D3D12_RESOURCE_FLAG_NONE;
 
-        HRESULT hr = dx12.GetDevice()->CreateCommittedResource(
-            &heapProps,
+        HRESULT Result = dx12.GetDevice()->CreateCommittedResource(
+            &HeapProperties,
             D3D12_HEAP_FLAG_NONE,
-            &resourceDesc,
+            &ResourceDescription,
             D3D12_RESOURCE_STATE_GENERIC_READ,
             nullptr,
-            IID_PPV_ARGS(&m_VertexBuffer)
-        );
+            IID_PPV_ARGS(&VertexBuffer)
+        ); //頂点Buffer作成結果
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
-        void* mapped = nullptr;
+        void* MappedData = nullptr; //頂点BufferのCPU書込先
 
-        hr = m_VertexBuffer->Map(
+        Result = VertexBuffer->Map(
             0,
             nullptr,
-            &mapped
+            &MappedData
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
             return false;
         }
 
         std::memcpy(
-            mapped,
-            m_Vertices.data(),
-            bufferSize
+            MappedData,
+            Vertices.data(),
+            BufferSize
         );
 
-        m_VertexBuffer->Unmap(
+        VertexBuffer->Unmap(
             0,
             nullptr
         );
 
-        m_VertexBufferView.BufferLocation =
-            m_VertexBuffer->GetGPUVirtualAddress();
+        VertexBufferView.BufferLocation =
+            VertexBuffer->GetGPUVirtualAddress();
 
-        m_VertexBufferView.SizeInBytes =
-            bufferSize;
+        VertexBufferView.SizeInBytes =
+            BufferSize;
 
-        m_VertexBufferView.StrideInBytes =
+        VertexBufferView.StrideInBytes =
             sizeof(GridVertex);
 
         return true;
     }
 
-    bool Grid::CreateConstantBuffer(DirectX12& dx12)
-    {
-        const UINT bufferSize =
-            Align256(sizeof(GridConstantBuffer));
-
-        D3D12_HEAP_PROPERTIES heapProps{};
-        heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-        heapProps.CPUPageProperty =
-            D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        heapProps.MemoryPoolPreference =
-            D3D12_MEMORY_POOL_UNKNOWN;
-        heapProps.CreationNodeMask = 1;
-        heapProps.VisibleNodeMask = 1;
-
-        D3D12_RESOURCE_DESC resourceDesc{};
-        resourceDesc.Dimension =
-            D3D12_RESOURCE_DIMENSION_BUFFER;
-        resourceDesc.Alignment = 0;
-        resourceDesc.Width = bufferSize;
-        resourceDesc.Height = 1;
-        resourceDesc.DepthOrArraySize = 1;
-        resourceDesc.MipLevels = 1;
-        resourceDesc.Format = DXGI_FORMAT_UNKNOWN;
-        resourceDesc.SampleDesc.Count = 1;
-        resourceDesc.SampleDesc.Quality = 0;
-        resourceDesc.Layout =
-            D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-        resourceDesc.Flags =
-            D3D12_RESOURCE_FLAG_NONE;
-
-        HRESULT hr = dx12.GetDevice()->CreateCommittedResource(
-            &heapProps,
-            D3D12_HEAP_FLAG_NONE,
-            &resourceDesc,
-            D3D12_RESOURCE_STATE_GENERIC_READ,
-            nullptr,
-            IID_PPV_ARGS(&m_ConstantBuffer)
-        );
-
-        if (FAILED(hr))
-        {
-            return false;
-        }
-
-        hr = m_ConstantBuffer->Map(
-            0,
-            nullptr,
-            reinterpret_cast<void**>(&m_MappedConstantBuffer)
-        );
-
-        return SUCCEEDED(hr);
-    }
 }

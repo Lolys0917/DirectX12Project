@@ -1,80 +1,77 @@
+//|| GraphicBase.cpp ||:::::::::::::::::::::::::
+//||
+//||  概要 :::::::::::::::::::::::::::::::::::::
+//||
+//||  DirectX12描画基盤の所有とライフサイクルを管理する
+//||
+//||  更新内容 :::::::::::::::::::::::::::::::::
+//||
+//||  2026_07_13  v2.00  Component描画とリサイズに対応
+//||  2026_06_01  v1.00  新規作成
+//||
+
 #include "GraphicBase.h"
 
 namespace Engine
 {
+    //未初期化のDirectX12描画基盤管理器を作成する
     GraphicBase::GraphicBase()
+        : Initialized(false)
     {
-        // �w�i�F
-        // ���ɋ߂��F�ɂ���ƍ�Grid��������
-        m_ClearColor[0] = 0.85f;
-        m_ClearColor[1] = 0.85f;
-        m_ClearColor[2] = 0.85f;
-        m_ClearColor[3] = 1.0f;
     }
 
+    //DirectX12描画基盤を終了して破棄する
     GraphicBase::~GraphicBase()
     {
         Finalize();
     }
 
-    bool GraphicBase::Initialize(
-        HWND hwnd,
-        uint32_t width,
-        uint32_t height
-    )
+    //指定した子WindowへDirectX12描画基盤を作成する
+    //引数: hwnd 描画対象Window、width 描画幅、height 描画高さ
+    //戻り値: 初期化に成功した場合はtrue
+    bool GraphicBase::Initialize(HWND hwnd, uint32_t width, uint32_t height)
     {
-        return m_DirectX12.Initialize(
-            hwnd,
-            width,
-            height
-        );
+        if (Initialized)
+        {
+            return true;
+        }
+
+        Initialized = Graphics.Initialize(hwnd, width, height);
+        return Initialized;
     }
 
+    //DirectX12描画基盤を終了する
     void GraphicBase::Finalize()
     {
-        m_DirectX12.Finalize();
-    }
-
-    void GraphicBase::BeginDraw()
-    {
-        m_DirectX12.BeginFrame(
-            m_ClearColor
-        );
-    }
-
-    void GraphicBase::DrawAll()
-    {
-        for (IRenderable* renderable : m_Renderables)
+        if (!Initialized)
         {
-            if (renderable)
-            {
-                renderable->Draw(m_DirectX12);
-            }
+            return;
         }
+
+        Graphics.Finalize();
+        Initialized = false;
     }
 
-    void GraphicBase::EndDraw()
+    //SwapChainとDepthBufferを指定サイズへ再作成する
+    //引数: width 新しい描画幅、height 新しい描画高さ
+    //戻り値: サイズ変更に成功した場合はtrue
+    bool GraphicBase::Resize(uint32_t width, uint32_t height)
     {
-        m_DirectX12.EndFrame();
-    }
-
-    void GraphicBase::AddRenderable(
-        IRenderable* renderable
-    )
-    {
-        if (renderable)
+        if (!Initialized)
         {
-            m_Renderables.push_back(renderable);
+            return false;
         }
-    }
 
-    void GraphicBase::ClearRenderables()
-    {
-        m_Renderables.clear();
+        return Graphics.Resize(width, height);
     }
 
     DirectX12& GraphicBase::GetDirectX12()
     {
-        return m_DirectX12;
+        return Graphics;
+    }
+
+    const DirectX12& GraphicBase::GetDirectX12() const
+    {
+        return Graphics;
     }
 }

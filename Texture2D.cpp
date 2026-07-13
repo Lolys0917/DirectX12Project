@@ -1,97 +1,156 @@
+//|| Texture2D.cpp ||:::::::::::::::::::::::::::
+//||
+//||  概要 :::::::::::::::::::::::::::::::::::::
+//||
+//||  WIC画像をDirectX12のTexture Resourceへ変換する
+//||
+//||  更新内容 :::::::::::::::::::::::::::::::::
+//||
+//||  2026_07_13  v1.30  編集: WIC、GPU転送及びSRV作成失敗をMessageLogへ記録
+//||                         WIC寸法取得と即時Command実行結果を検証
+//||  2026_07_13  v1.20  C++変数命名と宣言コメントを規則へ統一
+//||  2026_07_13  v1.10  COM初期化責務をWinMainへ集約
+//||  2026_06_01  v1.00  新規作成
+//||
+
 #include "Texture2D.h"
 
 #include "DirectX12.h"
+#include "MessageLog.h"
 
+#include <cstdio>
+#include <limits>
 #include <vector>
 #include <wincodec.h>
+#include <cstring>
 
 #pragma comment(lib, "windowscodecs.lib")
 
+namespace
+{
+    /**
+     * Texture処理のHRESULT失敗をMessageLogへ追加する
+     * @param operation 失敗したWICまたはDirectX処理名
+     * @param result 失敗を示すHRESULT
+     */
+    void AddTextureFailureLog(const char* operation, HRESULT result)
+    {
+        char Message[320]{}; // 処理名とHRESULTを含む表示用メッセージ
+        sprintf_s(
+            Message,
+            "[Error] Texture2D | %s failed. HRESULT=0x%08lX.",
+            operation,
+            static_cast<unsigned long>(result)
+        );
+        Engine::MessageLog::GetInstance().AddLog(Message);
+    }
+}
+
 namespace Engine
 {
+    //空のTexture管理Objectを作成する
     Texture2D::Texture2D()
-        : m_Width(0)
-        , m_Height(0)
-        , m_Format(DXGI_FORMAT_R8G8B8A8_UNORM)
+        : Width(0)
+        , Height(0)
+        , Format(DXGI_FORMAT_R8G8B8A8_UNORM)
     {
     }
 
+    //Texture Resourceを破棄する
     Texture2D::~Texture2D()
     {
     }
 
+    //WICで画像FileをRGBA8へ変換してTextureを作成する
+    //引数: dx12 描画基盤、filePath 読み込む画像File
+    //戻り値: 読み込みとTexture作成に成功した場合はtrue
     bool Texture2D::LoadFromFile(
         DirectX12& dx12,
         const std::wstring& filePath
     )
     {
-        CoInitializeEx(
-            nullptr,
-            COINIT_MULTITHREADED
-        );
+        Microsoft::WRL::ComPtr<IWICImagingFactory> Factory; //WIC画像Factory
 
-        Microsoft::WRL::ComPtr<IWICImagingFactory> factory;
-
-        HRESULT hr = CoCreateInstance(
+        HRESULT Result = CoCreateInstance(
             CLSID_WICImagingFactory,
             nullptr,
             CLSCTX_INPROC_SERVER,
-            IID_PPV_ARGS(&factory)
-        );
+            IID_PPV_ARGS(&Factory)
+        ); //WIC Factory作成結果
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
+            AddTextureFailureLog("CoCreateInstance for WIC factory", Result);
             return false;
         }
 
-        Microsoft::WRL::ComPtr<IWICBitmapDecoder> decoder;
+        Microsoft::WRL::ComPtr<IWICBitmapDecoder> Decoder; //画像File Decoder
 
-        hr = factory->CreateDecoderFromFilename(
+        Result = Factory->CreateDecoderFromFilename(
             filePath.c_str(),
             nullptr,
             GENERIC_READ,
             WICDecodeMetadataCacheOnLoad,
-            &decoder
+            &Decoder
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
+            AddTextureFailureLog("IWICImagingFactory::CreateDecoderFromFilename", Result);
             return false;
         }
 
-        Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> frame;
+        Microsoft::WRL::ComPtr<IWICBitmapFrameDecode> Frame; //先頭画像Frame
 
-        hr = decoder->GetFrame(
+        Result = Decoder->GetFrame(
             0,
-            &frame
+            &Frame
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
+            AddTextureFailureLog("IWICBitmapDecoder::GetFrame", Result);
             return false;
         }
 
-        UINT width = 0;
-        UINT height = 0;
+        UINT ImageWidth = 0; //読み込んだ画像幅
+        UINT ImageHeight = 0; //読み込んだ画像高さ
 
-        frame->GetSize(
-            &width,
-            &height
+        Result = Frame->GetSize(
+            &ImageWidth,
+            &ImageHeight
         );
 
-        Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
-
-        hr = factory->CreateFormatConverter(
-            &converter
-        );
-
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
+            AddTextureFailureLog("IWICBitmapFrameDecode::GetSize", Result);
             return false;
         }
 
-        hr = converter->Initialize(
-            frame.Get(),
+        if (ImageWidth == 0 || ImageHeight == 0 ||
+            ImageWidth > (std::numeric_limits<UINT>::max)() / 4 ||
+            ImageHeight > (std::numeric_limits<UINT>::max)() / (ImageWidth * 4))
+        {
+            MessageLog::GetInstance().AddLog(
+                "[Error] Texture2D | The decoded image dimensions are invalid or too large."
+            );
+            return false;
+        }
+
+        Microsoft::WRL::ComPtr<IWICFormatConverter> Converter; //RGBA8変換器
+
+        Result = Factory->CreateFormatConverter(
+            &Converter
+        );
+
+        if (FAILED(Result))
+        {
+            AddTextureFailureLog("IWICImagingFactory::CreateFormatConverter", Result);
+            return false;
+        }
+
+        Result = Converter->Initialize(
+            Frame.Get(),
             GUID_WICPixelFormat32bppRGBA,
             WICBitmapDitherTypeNone,
             nullptr,
@@ -99,57 +158,65 @@ namespace Engine
             WICBitmapPaletteTypeCustom
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
+            AddTextureFailureLog("IWICFormatConverter::Initialize", Result);
             return false;
         }
 
-        const UINT stride =
-            width * 4;
+        const UINT Stride =
+            ImageWidth * 4; //RGBA8一行のByte数
 
-        const UINT imageSize =
-            stride * height;
+        const UINT ImageSize =
+            Stride * ImageHeight; //画像全体のByte数
 
-        std::vector<unsigned char> pixels;
-        pixels.resize(imageSize);
+        std::vector<unsigned char> Pixels; //RGBA8画像Data
+        Pixels.resize(ImageSize);
 
-        hr = converter->CopyPixels(
+        Result = Converter->CopyPixels(
             nullptr,
-            stride,
-            imageSize,
-            pixels.data()
+            Stride,
+            ImageSize,
+            Pixels.data()
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
+            AddTextureFailureLog("IWICFormatConverter::CopyPixels", Result);
             return false;
         }
 
         return CreateFromRGBA(
             dx12,
-            pixels.data(),
-            width,
-            height
+            Pixels.data(),
+            ImageWidth,
+            ImageHeight
         );
     }
 
+    //1Pixelの白Textureを作成する
+    //引数: dx12 描画基盤
+    //戻り値: Texture作成に成功した場合はtrue
     bool Texture2D::CreateWhiteTexture(
         DirectX12& dx12
     )
     {
-        const unsigned char pixel[4] =
+        const unsigned char Pixel[4] =
         {
             255, 255, 255, 255
-        };
+        }; //白色RGBA8 Pixel
 
         return CreateFromRGBA(
             dx12,
-            pixel,
+            Pixel,
             1,
             1
         );
     }
 
+    //RGBA8 Pixel列からGPU Textureを作成する
+    //引数: dx12 描画基盤、pixels RGBA8 Data、width 幅、height 高さ
+    //戻り値: TextureとSRVの作成に成功した場合はtrue
     bool Texture2D::CreateFromRGBA(
         DirectX12& dx12,
         const unsigned char* pixels,
@@ -157,227 +224,253 @@ namespace Engine
         uint32_t height
     )
     {
-        m_Width = width;
-        m_Height = height;
-        m_Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-        D3D12_RESOURCE_DESC textureDesc{};
-        textureDesc.Dimension =
-            D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-        textureDesc.Alignment = 0;
-        textureDesc.Width = width;
-        textureDesc.Height = height;
-        textureDesc.DepthOrArraySize = 1;
-        textureDesc.MipLevels = 1;
-        textureDesc.Format = m_Format;
-        textureDesc.SampleDesc.Count = 1;
-        textureDesc.SampleDesc.Quality = 0;
-        textureDesc.Layout =
-            D3D12_TEXTURE_LAYOUT_UNKNOWN;
-        textureDesc.Flags =
-            D3D12_RESOURCE_FLAG_NONE;
-
-        D3D12_HEAP_PROPERTIES defaultHeap{};
-        defaultHeap.Type =
-            D3D12_HEAP_TYPE_DEFAULT;
-        defaultHeap.CPUPageProperty =
-            D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        defaultHeap.MemoryPoolPreference =
-            D3D12_MEMORY_POOL_UNKNOWN;
-        defaultHeap.CreationNodeMask = 1;
-        defaultHeap.VisibleNodeMask = 1;
-
-        HRESULT hr = dx12.GetDevice()->CreateCommittedResource(
-            &defaultHeap,
-            D3D12_HEAP_FLAG_NONE,
-            &textureDesc,
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            nullptr,
-            IID_PPV_ARGS(&m_Texture)
-        );
-
-        if (FAILED(hr))
+        if (pixels == nullptr || width == 0 || height == 0 ||
+            dx12.GetDevice() == nullptr ||
+            width > (std::numeric_limits<UINT>::max)() / 4)
         {
+            MessageLog::GetInstance().AddLog(
+                "[Error] Texture2D | RGBA texture creation received invalid data, size, or device."
+            );
             return false;
         }
 
-        D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};
-        UINT numRows = 0;
-        UINT64 rowSizeInBytes = 0;
-        UINT64 totalBytes = 0;
+        Width = width;
+        Height = height;
+        Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+
+        D3D12_RESOURCE_DESC TextureDescription{}; //GPU Texture Resource設定
+        TextureDescription.Dimension =
+            D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        TextureDescription.Alignment = 0;
+        TextureDescription.Width = width;
+        TextureDescription.Height = height;
+        TextureDescription.DepthOrArraySize = 1;
+        TextureDescription.MipLevels = 1;
+        TextureDescription.Format = Format;
+        TextureDescription.SampleDesc.Count = 1;
+        TextureDescription.SampleDesc.Quality = 0;
+        TextureDescription.Layout =
+            D3D12_TEXTURE_LAYOUT_UNKNOWN;
+        TextureDescription.Flags =
+            D3D12_RESOURCE_FLAG_NONE;
+
+        D3D12_HEAP_PROPERTIES DefaultHeapProperties{}; //Default Heap設定
+        DefaultHeapProperties.Type =
+            D3D12_HEAP_TYPE_DEFAULT;
+        DefaultHeapProperties.CPUPageProperty =
+            D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+        DefaultHeapProperties.MemoryPoolPreference =
+            D3D12_MEMORY_POOL_UNKNOWN;
+        DefaultHeapProperties.CreationNodeMask = 1;
+        DefaultHeapProperties.VisibleNodeMask = 1;
+
+        HRESULT Result = dx12.GetDevice()->CreateCommittedResource(
+            &DefaultHeapProperties,
+            D3D12_HEAP_FLAG_NONE,
+            &TextureDescription,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&TextureResource)
+        ); //GPU Texture作成結果
+
+        if (FAILED(Result))
+        {
+            AddTextureFailureLog("CreateCommittedResource for texture", Result);
+            return false;
+        }
+
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT Footprint{}; //Upload用Subresource配置
+        UINT RowCount = 0; //Texture行数
+        UINT64 RowSizeInBytes = 0; //非Alignment時の一行Byte数
+        UINT64 TotalBytes = 0; //Upload Buffer全体のByte数
 
         dx12.GetDevice()->GetCopyableFootprints(
-            &textureDesc,
+            &TextureDescription,
             0,
             1,
             0,
-            &footprint,
-            &numRows,
-            &rowSizeInBytes,
-            &totalBytes
+            &Footprint,
+            &RowCount,
+            &RowSizeInBytes,
+            &TotalBytes
         );
 
-        D3D12_HEAP_PROPERTIES uploadHeap{};
-        uploadHeap.Type =
+        D3D12_HEAP_PROPERTIES UploadHeapProperties{}; //Upload Heap設定
+        UploadHeapProperties.Type =
             D3D12_HEAP_TYPE_UPLOAD;
-        uploadHeap.CPUPageProperty =
+        UploadHeapProperties.CPUPageProperty =
             D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-        uploadHeap.MemoryPoolPreference =
+        UploadHeapProperties.MemoryPoolPreference =
             D3D12_MEMORY_POOL_UNKNOWN;
-        uploadHeap.CreationNodeMask = 1;
-        uploadHeap.VisibleNodeMask = 1;
+        UploadHeapProperties.CreationNodeMask = 1;
+        UploadHeapProperties.VisibleNodeMask = 1;
 
-        D3D12_RESOURCE_DESC uploadDesc{};
-        uploadDesc.Dimension =
+        D3D12_RESOURCE_DESC UploadDescription{}; //Upload Buffer Resource設定
+        UploadDescription.Dimension =
             D3D12_RESOURCE_DIMENSION_BUFFER;
-        uploadDesc.Alignment = 0;
-        uploadDesc.Width = totalBytes;
-        uploadDesc.Height = 1;
-        uploadDesc.DepthOrArraySize = 1;
-        uploadDesc.MipLevels = 1;
-        uploadDesc.Format = DXGI_FORMAT_UNKNOWN;
-        uploadDesc.SampleDesc.Count = 1;
-        uploadDesc.SampleDesc.Quality = 0;
-        uploadDesc.Layout =
+        UploadDescription.Alignment = 0;
+        UploadDescription.Width = TotalBytes;
+        UploadDescription.Height = 1;
+        UploadDescription.DepthOrArraySize = 1;
+        UploadDescription.MipLevels = 1;
+        UploadDescription.Format = DXGI_FORMAT_UNKNOWN;
+        UploadDescription.SampleDesc.Count = 1;
+        UploadDescription.SampleDesc.Quality = 0;
+        UploadDescription.Layout =
             D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-        uploadDesc.Flags =
+        UploadDescription.Flags =
             D3D12_RESOURCE_FLAG_NONE;
 
-        Microsoft::WRL::ComPtr<ID3D12Resource> uploadBuffer;
+        Microsoft::WRL::ComPtr<ID3D12Resource> UploadBuffer; //Texture転送用Upload Buffer
 
-        hr = dx12.GetDevice()->CreateCommittedResource(
-            &uploadHeap,
+        Result = dx12.GetDevice()->CreateCommittedResource(
+            &UploadHeapProperties,
             D3D12_HEAP_FLAG_NONE,
-            &uploadDesc,
+            &UploadDescription,
             D3D12_RESOURCE_STATE_GENERIC_READ,
             nullptr,
-            IID_PPV_ARGS(&uploadBuffer)
+            IID_PPV_ARGS(&UploadBuffer)
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
+            AddTextureFailureLog("CreateCommittedResource for texture upload", Result);
             return false;
         }
 
-        unsigned char* mapped = nullptr;
+        unsigned char* MappedData = nullptr; //Upload BufferのCPU書込先
 
-        hr = uploadBuffer->Map(
+        Result = UploadBuffer->Map(
             0,
             nullptr,
-            reinterpret_cast<void**>(&mapped)
+            reinterpret_cast<void**>(&MappedData)
         );
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
+            AddTextureFailureLog("ID3D12Resource::Map for texture upload", Result);
             return false;
         }
 
-        const UINT srcRowPitch =
-            width * 4;
+        const UINT SourceRowPitch =
+            width * 4; //入力RGBA8一行のByte数
 
-        unsigned char* dst =
-            mapped + footprint.Offset;
+        unsigned char* DestinationData =
+            MappedData + Footprint.Offset; //配置Offset反映済み転送先
 
-        for (UINT y = 0; y < height; ++y)
+        for (UINT RowIndex = 0; RowIndex < height; ++RowIndex) //各行をAlignment済み領域へコピーする
         {
             std::memcpy(
-                dst + y * footprint.Footprint.RowPitch,
-                pixels + y * srcRowPitch,
-                srcRowPitch
+                DestinationData + RowIndex * Footprint.Footprint.RowPitch,
+                pixels + RowIndex * SourceRowPitch,
+                SourceRowPitch
             );
         }
 
-        uploadBuffer->Unmap(
+        UploadBuffer->Unmap(
             0,
             nullptr
         );
 
-        dx12.ExecuteCommandListImmediately(
+        const bool UploadSucceeded = dx12.ExecuteCommandListImmediately(
             [&](ID3D12GraphicsCommandList* commandList)
             {
-                D3D12_TEXTURE_COPY_LOCATION src{};
-                src.pResource =
-                    uploadBuffer.Get();
-                src.Type =
+                D3D12_TEXTURE_COPY_LOCATION SourceLocation{}; //Upload Buffer側のCopy元
+                SourceLocation.pResource =
+                    UploadBuffer.Get();
+                SourceLocation.Type =
                     D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-                src.PlacedFootprint =
-                    footprint;
+                SourceLocation.PlacedFootprint =
+                    Footprint;
 
-                D3D12_TEXTURE_COPY_LOCATION dst{};
-                dst.pResource =
-                    m_Texture.Get();
-                dst.Type =
+                D3D12_TEXTURE_COPY_LOCATION DestinationLocation{}; //Texture側のCopy先
+                DestinationLocation.pResource =
+                    TextureResource.Get();
+                DestinationLocation.Type =
                     D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-                dst.SubresourceIndex = 0;
+                DestinationLocation.SubresourceIndex = 0;
 
                 commandList->CopyTextureRegion(
-                    &dst,
+                    &DestinationLocation,
                     0,
                     0,
                     0,
-                    &src,
+                    &SourceLocation,
                     nullptr
                 );
 
-                D3D12_RESOURCE_BARRIER barrier{};
-                barrier.Type =
+                D3D12_RESOURCE_BARRIER Barrier{}; //Copy後のTexture状態遷移
+                Barrier.Type =
                     D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                barrier.Transition.pResource =
-                    m_Texture.Get();
-                barrier.Transition.Subresource =
+                Barrier.Transition.pResource =
+                    TextureResource.Get();
+                Barrier.Transition.Subresource =
                     D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                barrier.Transition.StateBefore =
+                Barrier.Transition.StateBefore =
                     D3D12_RESOURCE_STATE_COPY_DEST;
-                barrier.Transition.StateAfter =
+                Barrier.Transition.StateAfter =
                     D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE;
 
                 commandList->ResourceBarrier(
                     1,
-                    &barrier
+                    &Barrier
                 );
             }
         );
 
+        if (!UploadSucceeded)
+        {
+            MessageLog::GetInstance().AddPermanentLog(
+                "[Critical] Texture2D | Texture upload commands were not executed successfully."
+            );
+            TextureResource.Reset();
+            return false;
+        }
+
         return CreateSRV(dx12);
     }
 
+    //Texture参照用Shader Resource Viewを作成する
+    //引数: dx12 描画基盤
+    //戻り値: Descriptor Heap作成に成功した場合はtrue
     bool Texture2D::CreateSRV(
         DirectX12& dx12
     )
     {
-        D3D12_DESCRIPTOR_HEAP_DESC heapDesc{};
-        heapDesc.Type =
+        D3D12_DESCRIPTOR_HEAP_DESC HeapDescription{}; //SRV Descriptor Heap設定
+        HeapDescription.Type =
             D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-        heapDesc.NumDescriptors = 1;
-        heapDesc.Flags =
+        HeapDescription.NumDescriptors = 1;
+        HeapDescription.Flags =
             D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-        heapDesc.NodeMask = 0;
+        HeapDescription.NodeMask = 0;
 
-        HRESULT hr = dx12.GetDevice()->CreateDescriptorHeap(
-            &heapDesc,
-            IID_PPV_ARGS(&m_SRVHeap)
-        );
+        HRESULT Result = dx12.GetDevice()->CreateDescriptorHeap(
+            &HeapDescription,
+            IID_PPV_ARGS(&SRVHeap)
+        ); //SRV Descriptor Heap作成結果
 
-        if (FAILED(hr))
+        if (FAILED(Result))
         {
+            AddTextureFailureLog("CreateDescriptorHeap for texture SRV", Result);
             return false;
         }
 
-        D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-        srvDesc.Format = m_Format;
-        srvDesc.ViewDimension =
+        D3D12_SHADER_RESOURCE_VIEW_DESC SRVDescription{}; //Texture2D用SRV設定
+        SRVDescription.Format = Format;
+        SRVDescription.ViewDimension =
             D3D12_SRV_DIMENSION_TEXTURE2D;
-        srvDesc.Shader4ComponentMapping =
+        SRVDescription.Shader4ComponentMapping =
             D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-        srvDesc.Texture2D.MipLevels = 1;
-        srvDesc.Texture2D.MostDetailedMip = 0;
-        srvDesc.Texture2D.PlaneSlice = 0;
-        srvDesc.Texture2D.ResourceMinLODClamp = 0.0f;
+        SRVDescription.Texture2D.MipLevels = 1;
+        SRVDescription.Texture2D.MostDetailedMip = 0;
+        SRVDescription.Texture2D.PlaneSlice = 0;
+        SRVDescription.Texture2D.ResourceMinLODClamp = 0.0f;
 
         dx12.GetDevice()->CreateShaderResourceView(
-            m_Texture.Get(),
-            &srvDesc,
-            m_SRVHeap->GetCPUDescriptorHandleForHeapStart()
+            TextureResource.Get(),
+            &SRVDescription,
+            SRVHeap->GetCPUDescriptorHandleForHeapStart()
         );
 
         return true;
@@ -385,16 +478,18 @@ namespace Engine
 
     ID3D12DescriptorHeap* Texture2D::GetSRVHeap() const
     {
-        return m_SRVHeap.Get();
+        return SRVHeap.Get();
     }
 
     D3D12_GPU_DESCRIPTOR_HANDLE Texture2D::GetSRVGPUHandle() const
     {
-        return m_SRVHeap->GetGPUDescriptorHandleForHeapStart();
+        return SRVHeap->GetGPUDescriptorHandleForHeapStart();
     }
 
+    //TextureとSRVが描画可能な状態か判定する
+    //戻り値: TextureとSRVが存在する場合はtrue
     bool Texture2D::IsValid() const
     {
-        return m_Texture != nullptr && m_SRVHeap != nullptr;
+        return TextureResource != nullptr && SRVHeap != nullptr;
     }
 }
