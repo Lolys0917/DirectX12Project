@@ -22,10 +22,20 @@
 
 #include "Component.h"
 #include "EntityTypes.h"
+//オブジェクトインクルード
 #include "Object.h"
+#include "Sphere.h"
+
 
 namespace Engine
 {
+    struct ObjectDataPool
+    {
+        std::vector<Box> BoxObject;
+        std::vector<Sphere> SphereObject;
+        std::vector<OBJModel> ObjModel;
+    };
+
     class DirectX12;
     struct RenderContext;
 
@@ -75,6 +85,7 @@ namespace Engine
             std::unique_ptr<Object> object,
             const std::string& requestedName
         );
+
 
         //指定ObjectへComponentを生成してOwner×型×解決名索引へ登録する
         //引数: ownerID 所有Object、requestedName 希望名、arguments Component構築引数
