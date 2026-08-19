@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.40  GPU Textureを明示的に解放するResetを追加
 //||  2026_07_13  v1.30  編集: WIC、GPU転送及びSRV作成失敗をMessageLogへ記録
 //||                         WIC寸法取得と即時Command実行結果を検証
 //||  2026_07_13  v1.20  C++変数命名と宣言コメントを規則へ統一
@@ -59,6 +60,17 @@ namespace Engine
     //Texture Resourceを破棄する
     Texture2D::~Texture2D()
     {
+        Reset();
+    }
+
+    //所有するTexture ResourceとSRVを解放する
+    void Texture2D::Reset()
+    {
+        SRVHeap.Reset();
+        TextureResource.Reset();
+        Width = 0;
+        Height = 0;
+        Format = DXGI_FORMAT_R8G8B8A8_UNORM;
     }
 
     //WICで画像FileをRGBA8へ変換してTextureを作成する

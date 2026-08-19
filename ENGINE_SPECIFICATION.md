@@ -1,6 +1,6 @@
 # DirectX 12 エンジン基盤仕様
 
-更新日: 2026-08-17
+更新日: 2026-08-19
 
 ## 1. 設計方針
 
@@ -33,7 +33,7 @@ ObjectID と ComponentID は Scene 内でのみ有効な強い型とする。Sce
 
 ### 2.2 Object 名
 
-Object は `ObjectType × ResolvedName = ObjectID` で登録する。同じ ObjectType 内で同名が指定された場合は、次のように解決する。
+Object は `ResolvedName = ObjectID` でSceneごとに登録する。型に関係なく同名が指定された場合は、次のように解決する。
 
 ```text
 Player
@@ -41,7 +41,7 @@ Player_1
 Player_2
 ```
 
-異なる ObjectType では同名を使用できる。名前の接尾辞番号は削除後も巻き戻さない。
+異なる ObjectType でも同名は使用しない。これにより組込みAPIと将来のVisual ScriptingはObject型を別途保持せず、名前だけで安定IDへ解決できる。名前の接尾辞番号は削除後も巻き戻さない。
 
 ### 2.3 Component 名
 
@@ -50,22 +50,24 @@ Component は `OwnerObjectID × ComponentType × ResolvedName = ComponentID` で
 ### 2.4 検索量
 
 - ID 検索: ID を安定 vector slot として使用するため厳密に O(1)。
-- Type × Name 検索: `vector<unordered_map>` を使用し、リスト走査なし、平均 O(1)。文字列長とハッシュ衝突を含む最悪計算量は O(n) になり得る。
+- Name検索: Sceneごとの`unordered_map`を使用し、リスト走査なし、平均 O(1)。Type × Name検索も名前解決後に型を検証する。文字列長とハッシュ衝突を含む最悪計算量は O(n) になり得る。
 - Update と Draw: 有効な要素を処理するため O(n)。Find の要件とは別である。
 
 検索 API は見つからない場合に例外で暗黙挿入せず、`nullptr` または無効な ID を返す。
 
 ## 3. Object と Component のライフサイクル
 
-1. `ObjectManager::CreateObject` が Object を生成し、型別プールと ID 索引へ登録する。
+1. `ObjectManager::CreateObject` が Object を生成し、Scene内名前索引と ID 索引へ登録する。
 2. `ObjectManager::AddComponent` が所有 Object に Component を追加し、Owner、型、解決済み名、ComponentID を設定する。
-3. Scene 初期化時に Component の `Initialize` を呼ぶ。
+3. Scene 初期化時に Component の `Initialize` を呼ぶ。派生Componentは最初に `Component::Initialize` を呼び、Owner、ComponentID、解決済み名の登録完了を検証する。
 4. Active Scene のみ `Update` する。
 5. Active Scene の全 Camera ごとに描画 Component を `Draw` する。
 6. 削除時は Component の索引を先に無効化してから Object を tombstone にする。
 7. Scene 破棄時は GPU 使用完了後に Component、Object、ObjectManager の順で破棄する。
 
 Script Componentは `OnAttach`、`OnStart`、`OnUpdate`、`OnStop`、`OnDetach` の順序を保証する。Object又はScriptが非Activeの場合は `OnUpdate` を呼ばない。実行中に追加したScriptは `Scene::InitializePendingComponents` により次の更新前に初期化する。
+
+派生Componentの終了処理は固有GPU Resource又はDLL Instanceを解放した後に `Component::Finalize` を呼ぶ。Renderable ObjectはActive状態に関係なく登録時にGPU Resourceを初期化する。これにより、非Active状態で複製したObjectを後からActiveにしても未初期化Resourceを描画しない。
 
 Scene のデフォルトコピーは行わない。複製 API は Object と Component を新しい ObjectManager へ複製し、GPU リソースを複製先の描画環境で再初期化する。
 
@@ -168,9 +170,12 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 - UI の画像とフォント設定は Windows UI リソース設定クラスへ集約する。
 - 全構成を Unicode、Windows subsystem、C++20 に統一する。
 - Debug/Release と CRT の組み合わせを一致させる。
+- Editorが生成する `UserPrograms` と `UserScripts` はHot Reload用のDebug構成だけを持ち、Debug CRTを静的リンクする。これによりRelease Engineから読み込む場合も開発PC固有の `VCRUNTIME140D.dll` 又は `ucrtbased.dll` を要求しない。
 - ソースは UTF-8 としてコンパイルする。
 - `d3dx12.h` は外部提供ファイルのためプロジェクト固有の命名・コメント修正対象外とする。
 - `SampleRotationScript.dll` は外部Script Moduleの動作例としてApplicationと同じ構成、Platformの出力先へ生成する。
+
+環境変数 `DX12_ENGINE_DIAGNOSTICS=1` を設定して起動すると、通常UI操作へ入る前にScene、Object、Component、名前API、寸法API、Script、DLL、描画、Resize、終了処理を連続検証して自動終了する。結果は `DX12_ENGINE_DIAGNOSTIC_REPORT` で指定したUTF-8 Logへ保存する。DLL診断を含める場合は `DX12_ENGINE_DIAGNOSTIC_SCRIPT_DLL` と `DX12_ENGINE_DIAGNOSTIC_EXTENSION_DLL` に対象Pathを設定する。
 
 ## 10. コーディング規則
 
@@ -184,7 +189,7 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 
 ## 11. Main／Subプログラム境界
 
-Mainプログラムは `Engine.h` と `EngineAPI` を入口とするC++ネイティブコードであり、`GameApp`、`DirectX12`、`SceneManager`、各Sceneの `ObjectManager`、Script Registry及びDLL Module Managerへ到達できる。ゲーム固有の根幹処理は `MainScene` のような派生Sceneへ直書きできる。毎フレームの順序は `Main Program → Active Scene → Object／Component／Sub Script` とする。
+通常のMainプログラムは `GameEngineAPI.h` を入口とし、Sceneごとの一つのCPPへ `Init`、`Update`、`End`を実装する。Object生成と設定はScene内一意名を使う高級APIを標準とし、DLL Export、Instance、Scene ID解決は固定Adapterへ隠す。上級者は`Advanced.Host()`から`EngineHostAPI`へ降り、Scene、Object、Component、Script Registry相当の詳細操作を組み合わせられる。毎フレームの順序は `Main Program → Active Scene → Object／Component／Sub Script` とする。
 
 Subプログラムは `Script` 派生Componentであり、EditorのEngine TabからObjectへ差し込む。Native ScriptとDLL Scriptは同じComponent ID、Active状態、初期化、複製、削除経路を使う。
 

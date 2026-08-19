@@ -7,6 +7,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v3.10  GameEngine組込みAPIをコード補完走査対象へ追加
 //||  2026_08_17  v3.00  Tab式EditorとObject／Script Context操作を追加
 //||  2026_07_13  v2.30  修正: 右パネル背景のZ Orderを最背面へ固定
 //||                         上段操作、中央FPS、下段ログの配置へ変更
@@ -167,6 +168,10 @@ namespace Engine
             L"SetColorWhenPressed", L"MakeObjectScriptDescriptor",
             L"MultiplyColor", L"MultiplyColorWhenPressed",
             L"MultiplyObjectColor", L"SetProgramSuggestion",
+            L"Init", L"Update", L"End", L"ENGINE_REGISTER_SCENE",
+            L"CreateCapsuleModel", L"CreateBox", L"CreateSphere",
+            L"SetSize", L"SetPosition", L"SetTransform", L"SetColor",
+            L"Exists", L"AttachScript", L"Advanced",
             L"LeftArrow", L"UpArrow", L"RightArrow", L"DownArrow",
             L"KeyA", L"KeyB", L"KeyD", L"KeyG", L"KeyR", L"KeyS", L"KeyW"
         }; //Program補完へ常時登録するC++及び外部Engine API識別子
@@ -4608,7 +4613,7 @@ namespace Engine
             ProgramRoleLabelHwnd,
             scriptWorkspace
                 ? L"スクリプト（サブ）：ObjectへAttachし、Unityのスクリプト相当として毎フレーム実行します。"
-                : L"メイン：毎フレームの最初に実行し、Scene／Object／Script全体を制御します。"
+                : L"メイン：SceneごとのInit／Update／Endを名前指定の簡易APIで実装します。"
         );
         RefreshProgramFiles();
         EnableWindow(
@@ -4639,6 +4644,7 @@ namespace Engine
         {
             ProjectRoot / L"EngineAPI.h",
             ProjectRoot / L"EngineExtensionAPI.h",
+            ProjectRoot / L"GameEngineAPI.h",
             ProjectRoot / L"ScriptModuleAPI.h",
             ProjectRoot / L"GameScriptAPI.h",
             ProjectRoot / L"GameObjectTemplate.h",

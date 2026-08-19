@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  名前指定Capsule生成とID／名前指定寸法APIを末尾追加
 //||  2026_08_18  v1.00  新規作成
 //||
 
@@ -168,6 +169,12 @@ struct EngineHostAPI final
     bool (ENGINE_EXTENSION_CALL* IsKeyDown)(void* context, std::uint32_t virtualKey);
     bool (ENGINE_EXTENSION_CALL* MultiplyObjectColor)(void* context, std::uint32_t sceneID, std::uint32_t objectID, const EngineExternalColor* multiplier);
     bool (ENGINE_EXTENSION_CALL* SetProgramSuggestion)(void* context, const char* suggestion);
+
+    //v1.10以降の追記専用API。Sizeで存在確認してから古いHostとの互換性を保って使用する。
+    std::uint32_t (ENGINE_EXTENSION_CALL* FindObjectByNameOnly)(void* context, std::uint32_t sceneID, const char* name);
+    std::uint32_t (ENGINE_EXTENSION_CALL* CreateCapsuleModel)(void* context, std::uint32_t sceneID, const char* name, std::uint32_t parentObjectID);
+    bool (ENGINE_EXTENSION_CALL* SetObjectSize)(void* context, std::uint32_t sceneID, std::uint32_t objectID, const EngineExternalVector3* size);
+    bool (ENGINE_EXTENSION_CALL* SetObjectSizeByName)(void* context, std::uint32_t sceneID, const char* name, const EngineExternalVector3* size);
 };
 
 struct EngineExtensionModuleDescriptor final

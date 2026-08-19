@@ -61,21 +61,43 @@ MultiplyColor(0.75f, 1.0f, 0.85f, 1.0f);
 
 Main Programでは同じ機能を`SetObjectColor`と`MultiplyObjectColor`から利用します。
 
-## Main外部API
+## Main Scene簡易API
 
 `EngineExtensionAPI.h`の`EngineHostAPI`は追記専用のC ABI関数表です。Scene、Object、Component、Scriptの列挙・作成・検索・編集に加え、Transform、親子関係、絶対色、乗算色、Keyboard入力を外部DLLから操作できます。
 
-外部Main Programから候補を追加する場合は次のように登録します。
+通常のMain ProgramはSceneごとに一つのCPPを持ち、`Init`、`Update`、`End`だけを実装します。`GameEngineAPI.h`の組込みAPIへObject名を渡すと、Scene内で一意な安定IDへ内部解決されます。
 
 ```cpp
-host->SetProgramSuggestion(host->Context, "MyGameplayFunction");
+using namespace EngineGame;
+
+namespace Game::MainScene
+{
+    void Init()
+    {
+        AddObject.CreateCapsuleModel("PlayerCapsule");
+        Object.SetSize("PlayerCapsule", 1.0f, 2.0f, 1.0f);
+    }
+
+    void Update(float deltaTime) { (void)deltaTime; }
+    void End() {}
+}
+
+ENGINE_REGISTER_SCENE(MainScene)
 ```
 
-登録名はC++識別子として有効な文字列に限られます。追加後はMain／スクリプト両タブの候補へ反映されます。候補は大文字小文字を区別せず検索され、Tabキーだけで確定します。
+主な入口は`AddObject`、`Object`、`Scene`、`Input`、`Log`です。`Object`には`Exists`、`SetSize`、`SetPosition`、`SetTransform`、`Move`、`SetColor`、`MultiplyColor`、`Remove`、`AttachScript`があります。
+
+上級者は次の入口から低Level C ABI関数表を直接利用できます。
+
+```cpp
+const EngineHostAPI* Host = Advanced.Host();
+```
+
+DLLのExportやScene ID解決は`Templates/EngineExtension/MainProgramAdapter.cpp`が受け持つため、通常は編集しません。互換用の`EngineProgramAPI`も残しているため、IDをCacheした高度なコードと名前中心のコードを混在できます。
 
 ## 組み込み例
 
 - `OscillatingBox`: MainSceneが作成し、`box.horizontal_oscillation` Sub Scriptを自動Attachします。水色を直接設定後に色係数を乗算し、X軸の左右へ往復します。
-- `MainOscillatingCapsule`: `Programs/ExtensionMain.cpp`が外部APIから作成します。橙色を直接設定後に色係数を乗算し、Main ProgramからZ軸の前後へ往復します。
+- `MainOscillatingCapsule`: `Programs/MainScene.cpp`の`Init`が名前指定で作成します。橙色を直接設定後に色係数を乗算し、`Update`からZ軸の前後へ往復します。
 
-実装例は`ScriptPrograms/BoxKeyboardColorScript.cpp`と`Programs/ExtensionMain.cpp`にあります。
+実装例は`ScriptPrograms/BoxKeyboardColorScript.cpp`と`Programs/MainScene.cpp`にあります。

@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  Attach状態の読取APIを追加
 //||  2026_08_17  v1.00  新規作成
 //||
 
@@ -31,6 +32,7 @@ namespace Engine
 
         const std::string& GetScriptKey() const;
         const std::string& GetDisplayName() const;
+        bool IsAttached() const;
         bool HasStarted() const;
 
     protected:

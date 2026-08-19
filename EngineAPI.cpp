@@ -6,11 +6,14 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  名前指定とID指定を共有するPrimitive生成・寸法APIを追加
 //||  2026_08_17  v1.00  新規作成
 //||
 
 #include "EngineAPI.h"
 
+#include <algorithm>
+#include <cmath>
 #include <limits>
 
 #include "Box.h"
@@ -79,6 +82,57 @@ namespace Engine
             case ComponentType::Script: return "Script";
             default: return "Unknown";
             }
+        }
+
+        //概要：3軸の外形寸法を各Primitive固有の形状値へ変換して設定する
+        //引数：object=設定対象Object、size=X幅・Y高さ・Z奥行き
+        //戻り値：対応Primitiveへ有効な寸法を設定できた場合はtrue
+        bool ApplyObjectSize(Object& object, const EditorVector3& size)
+        {
+            if (!std::isfinite(size.X) || !std::isfinite(size.Y) ||
+                !std::isfinite(size.Z) || size.X <= 0.0f ||
+                size.Y <= 0.0f || size.Z <= 0.0f)
+            {
+                return false;
+            }
+
+            if (auto* Value = dynamic_cast<Box*>(&object))
+            {
+                Value->SetSize(size.X, size.Y, size.Z);
+                return true;
+            }
+
+            if (auto* Value = dynamic_cast<Sphere*>(&object))
+            {
+                Value->SetRadius((std::max)({ size.X, size.Y, size.Z }) * 0.5f);
+                return true;
+            }
+
+            if (auto* Value = dynamic_cast<Plane*>(&object))
+            {
+                Value->SetSize(size.X, size.Z);
+                return true;
+            }
+
+            if (auto* Value = dynamic_cast<Cylinder*>(&object))
+            {
+                Value->SetSize((std::max)(size.X, size.Z) * 0.5f, size.Y);
+                return true;
+            }
+
+            if (auto* Value = dynamic_cast<HalfSphere*>(&object))
+            {
+                Value->SetRadius((std::max)({ size.X, size.Y, size.Z }) * 0.5f);
+                return true;
+            }
+
+            if (auto* Value = dynamic_cast<Capsule*>(&object))
+            {
+                Value->SetSize((std::max)(size.X, size.Z) * 0.5f, size.Y);
+                return true;
+            }
+
+            return false;
         }
     }
 
@@ -256,6 +310,21 @@ namespace Engine
         return TargetScene == nullptr ? SceneID() : TargetScene->GetID();
     }
 
+    //概要：Scene内で一意な解決済み名から安定Object IDを検索する
+    //引数：sceneID=対象Scene、name=検索するUTF-8名
+    //戻り値：一致したObject ID、存在しない場合は無効ID
+    ObjectID EngineAPI::FindObjectID(
+        SceneID sceneID,
+        const std::string& name
+    ) const
+    {
+        const Scene* TargetScene = ResolveScene(sceneID); //検索対象Scene
+        const Object* TargetObject = TargetScene == nullptr
+            ? nullptr
+            : TargetScene->GetObjectManager().FindObject(name); //名前が一致したObject
+        return TargetObject == nullptr ? ObjectID() : TargetObject->GetID();
+    }
+
     //概要：Scene内のObject型と解決済み名から安定Object IDを検索する
     //引数：sceneID=対象Scene、objectType=Object具象型、name=検索するUTF-8名
     //戻り値：一致したObject ID、存在しない場合は無効ID
@@ -424,6 +493,23 @@ namespace Engine
 
         IncrementRevision();
         return CreatedObject;
+    }
+
+    //概要：指定Sceneへ名前付きCapsule Modelを作成する
+    //引数：sceneID=作成先Scene、requestedName=Scene内で一意化する希望名、parentID=親又は無効ID
+    //戻り値：登録済みCapsule、作成失敗時はnullptr
+    Capsule* EngineAPI::CreateCapsuleModel(
+        SceneID sceneID,
+        const std::string& requestedName,
+        ObjectID parentID
+    )
+    {
+        return dynamic_cast<Capsule*>(CreateObject(
+            sceneID,
+            ObjectType::Capsule,
+            requestedName,
+            parentID
+        ));
     }
 
     //概要：ゲーム固有値を持つ複製可能なObject雛形を指定Sceneへ作成する
@@ -748,6 +834,35 @@ namespace Engine
             transform.Scale.Z
         });
         return true;
+    }
+
+    //概要：ID指定Objectの3軸外形寸法を具象Primitive形状へ設定する
+    //引数：sceneID=対象Scene、objectID=対象Object、size=X幅・Y高さ・Z奥行き
+    //戻り値：対応Primitiveへ寸法を設定できた場合はtrue
+    bool EngineAPI::SetObjectSize(
+        SceneID sceneID,
+        ObjectID objectID,
+        const EditorVector3& size
+    )
+    {
+        Scene* TargetScene = ResolveScene(sceneID); //Objectを所有するScene
+        Object* TargetObject = TargetScene == nullptr
+            ? nullptr
+            : TargetScene->GetObjectManager().FindObject(objectID); //寸法設定対象
+        return TargetObject != nullptr && ApplyObjectSize(*TargetObject, size);
+    }
+
+    //概要：Scene内で一意な名前をIDへ解決して3軸外形寸法を設定する
+    //引数：sceneID=対象Scene、name=対象Object名、size=X幅・Y高さ・Z奥行き
+    //戻り値：対応Primitiveへ寸法を設定できた場合はtrue
+    bool EngineAPI::SetObjectSize(
+        SceneID sceneID,
+        const std::string& name,
+        const EditorVector3& size
+    )
+    {
+        const ObjectID TargetID = FindObjectID(sceneID, name); //名前から解決した安定ID
+        return TargetID.IsValid() && SetObjectSize(sceneID, TargetID, size);
     }
 
     //概要：Box等Primitive Objectの現在RGBA頂点色を読み取る
@@ -1334,7 +1449,7 @@ namespace Engine
                 Objects.FindComponent(Component)
             ); //同じRegistry KeyでAttach済みのScript
 
-            if (ExistingScript != nullptr && ExistingScript->GetName() == scriptKey)
+            if (ExistingScript != nullptr && ExistingScript->GetScriptKey() == scriptKey)
             {
                 return true;
             }

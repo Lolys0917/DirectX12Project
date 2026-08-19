@@ -7,6 +7,7 @@
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
 //||  2026_07_13  v2.30  OBJ行解析、描画Resource及びTexture失敗をMessageLogへ記録
+//||  2026_08_19  v2.30  基底契約とGPU Resourceの明示的終了を追加
 //||  2026_07_13  v2.20  Root Constants、安全なOBJ解析、複製元情報を追加
 //||  2026_07_13  v2.10  C++変数命名と宣言コメントを規則へ統一
 //||  2026_07_13  v2.00  Objectの姿勢とRenderContextを使用するComponentへ変更
@@ -296,6 +297,14 @@ float4 PSMain(VSOutput input) : SV_TARGET
     //OBJ Modelの終了処理を行う
     void OBJModel::Finalize()
     {
+        Texture.Reset();
+        IndexBuffer.Reset();
+        VertexBuffer.Reset();
+        PipelineState.Reset();
+        RootSignature.Reset();
+        VertexBufferView = {};
+        IndexBufferView = {};
+        Component::Finalize();
     }
 
     //未登録状態のOBJ Model定義を複製する
@@ -406,6 +415,11 @@ float4 PSMain(VSOutput input) : SV_TARGET
     //戻り値: Resource作成に成功またはMesh未設定の場合はtrue
     bool OBJModel::Initialize(DirectX12& dx12)
     {
+        if (!Component::Initialize(dx12))
+        {
+            return false;
+        }
+
         if (PipelineState && RootSignature && VertexBuffer && IndexBuffer &&
             Texture.IsValid())
         {

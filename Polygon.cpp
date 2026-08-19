@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v2.20  Component基底の初期化と終了契約を適用
 //||  2026_07_13  v2.10  Owner姿勢を使用する共通Mesh描画へ変更
 //||  2026_07_13  v2.00  Componentとして新規実装
 //||
@@ -76,6 +77,11 @@ namespace Engine
     //戻り値: CPU形状を構築してResource作成を要求できた場合はtrue
     bool Polygon::Initialize(DirectX12& dx12)
     {
+        if (!Component::Initialize(dx12))
+        {
+            return false;
+        }
+
         BuildMesh();
         return Mesh.CreateGPUResource(dx12);
     }
@@ -102,6 +108,7 @@ namespace Engine
     void Polygon::Finalize()
     {
         Mesh.ReleaseGPUResource();
+        Component::Finalize();
     }
 
     //未登録状態のPolygon定義を複製する

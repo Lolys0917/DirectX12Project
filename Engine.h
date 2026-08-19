@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  Main Program向けGameEngine組込みAPIを統合
 //||  2026_08_17  v1.00  新規作成
 //||
 
@@ -23,6 +24,7 @@
 #include "EntityTypes.h"
 #include "ExtensionSystem.h"
 #include "GameApp.h"
+#include "GameEngineAPI.h"
 #include "GameObjectTemplate.h"
 #include "Grid.h"
 #include "HalfSphere.h"

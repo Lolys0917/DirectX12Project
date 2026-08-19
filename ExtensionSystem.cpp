@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  名前指定Capsule生成、寸法設定、DLL診断を追加
 //||  2026_08_18  v1.00  新規作成
 //||
 
@@ -17,6 +18,7 @@
 #include <vector>
 
 #include "Component.h"
+#include "Capsule.h"
 #include "EngineAPI.h"
 #include "GameObjectTemplate.h"
 #include "MessageLog.h"
@@ -29,6 +31,71 @@ namespace Engine
 {
     namespace
     {
+        //概要：Windows LoaderのError Codeを診断可能な一行文字列へ変換する
+        //引数：errorCode=GetLastErrorが返した値
+        //戻り値：数値CodeとSystem Messageを含む文字列
+        std::string FormatWindowsLoaderError(DWORD errorCode)
+        {
+            LPWSTR Buffer = nullptr; //FormatMessageが確保するUnicode System Message
+            const DWORD Length = FormatMessageW(
+                FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                FORMAT_MESSAGE_FROM_SYSTEM |
+                FORMAT_MESSAGE_IGNORE_INSERTS,
+                nullptr,
+                errorCode,
+                0,
+                reinterpret_cast<LPWSTR>(&Buffer),
+                0,
+                nullptr
+            ); //System MessageのByte数
+            std::string Message = "Windows error " + std::to_string(errorCode); //必ず残す数値情報
+
+            if (Length != 0 && Buffer != nullptr)
+            {
+                std::wstring Detail(Buffer, Length); //改行を除去するSystem Message
+
+                while (!Detail.empty() &&
+                    (Detail.back() == L'\r' || Detail.back() == L'\n' || Detail.back() == L' '))
+                {
+                    Detail.pop_back();
+                }
+
+                const int ByteCount = WideCharToMultiByte(
+                    CP_UTF8,
+                    0,
+                    Detail.data(),
+                    static_cast<int>(Detail.size()),
+                    nullptr,
+                    0,
+                    nullptr,
+                    nullptr
+                ); //UTF-8変換後Byte数
+
+                if (ByteCount > 0)
+                {
+                    std::string Utf8Detail(ByteCount, '\0'); //MessageLogへ渡すUTF-8詳細
+                    WideCharToMultiByte(
+                        CP_UTF8,
+                        0,
+                        Detail.data(),
+                        static_cast<int>(Detail.size()),
+                        Utf8Detail.data(),
+                        ByteCount,
+                        nullptr,
+                        nullptr
+                    );
+                    Message += ": " + Utf8Detail;
+                }
+            }
+
+            if (Buffer != nullptr)
+            {
+                LocalFree(Buffer);
+            }
+
+            return Message;
+        }
+
         //概要：外部API ContextをNative Engine Facadeへ復元する
         //引数：context=EngineHostAPIへ設定したContext
         //戻り値：EngineAPIへの参照
@@ -582,6 +649,72 @@ namespace Engine
             ).GetValue();
         }
 
+        //概要：外部ProgramからScene内で一意な解決済み名だけでObject IDを検索する
+        //引数：context=Engine Context、sceneID=対象Scene、name=検索名
+        //戻り値：一致したObject ID、未登録時は0
+        std::uint32_t ENGINE_EXTENSION_CALL FindExternalObjectByNameOnly(
+            void* context,
+            std::uint32_t sceneID,
+            const char* name
+        )
+        {
+            return name == nullptr
+                ? 0
+                : GetEngine(context).FindObjectID(SceneID(sceneID), name).GetValue();
+        }
+
+        //概要：外部Programから名前付きCapsule Modelを生成する
+        //引数：context=Engine Context、sceneID=作成先Scene、name=希望名、parentObjectID=親又は無効ID
+        //戻り値：作成したCapsule ID、失敗時は0
+        std::uint32_t ENGINE_EXTENSION_CALL CreateExternalCapsuleModel(
+            void* context,
+            std::uint32_t sceneID,
+            const char* name,
+            std::uint32_t parentObjectID
+        )
+        {
+            Capsule* Created = GetEngine(context).CreateCapsuleModel(
+                SceneID(sceneID),
+                name == nullptr ? std::string() : std::string(name),
+                ObjectID(parentObjectID)
+            ); //Native APIで作成したCapsule
+            return Created == nullptr ? 0 : Created->GetID().GetValue();
+        }
+
+        //概要：外部ProgramからID指定Objectの3軸外形寸法を設定する
+        //引数：context=Engine Context、sceneID=対象Scene、objectID=対象Object、size=X幅・Y高さ・Z奥行き
+        //戻り値：対応Primitiveへ寸法を設定できた場合はtrue
+        bool ENGINE_EXTENSION_CALL SetExternalObjectSize(
+            void* context,
+            std::uint32_t sceneID,
+            std::uint32_t objectID,
+            const EngineExternalVector3* size
+        )
+        {
+            return size != nullptr && GetEngine(context).SetObjectSize(
+                SceneID(sceneID),
+                ObjectID(objectID),
+                EditorVector3{ size->X, size->Y, size->Z }
+            );
+        }
+
+        //概要：外部Programから名前指定Objectの3軸外形寸法を設定する
+        //引数：context=Engine Context、sceneID=対象Scene、name=対象名、size=X幅・Y高さ・Z奥行き
+        //戻り値：対応Primitiveへ寸法を設定できた場合はtrue
+        bool ENGINE_EXTENSION_CALL SetExternalObjectSizeByName(
+            void* context,
+            std::uint32_t sceneID,
+            const char* name,
+            const EngineExternalVector3* size
+        )
+        {
+            return name != nullptr && size != nullptr && GetEngine(context).SetObjectSize(
+                SceneID(sceneID),
+                name,
+                EditorVector3{ size->X, size->Y, size->Z }
+            );
+        }
+
         //概要：外部Programへ指定Objectの直接Child数を返す
         //引数：context=Engine Context、sceneID=対象Scene、objectID=親Object
         //戻り値：直接Child数
@@ -949,6 +1082,10 @@ namespace Engine
         Host.IsKeyDown = IsExternalKeyDown;
         Host.MultiplyObjectColor = MultiplyExternalObjectColor;
         Host.SetProgramSuggestion = SetExternalProgramSuggestion;
+        Host.FindObjectByNameOnly = FindExternalObjectByNameOnly;
+        Host.CreateCapsuleModel = CreateExternalCapsuleModel;
+        Host.SetObjectSize = SetExternalObjectSize;
+        Host.SetObjectSizeByName = SetExternalObjectSizeByName;
     }
 
     //概要：稼働中の外部Program Instanceを破棄してDLLを解放する
@@ -970,16 +1107,31 @@ namespace Engine
 
         if (Candidate.Handle == nullptr)
         {
-            MessageLog::GetInstance().AddLog("[Error] Extension | LoadLibrary failed; active module was preserved.");
+            const DWORD ErrorCode = GetLastError(); //LoadLibrary失敗直後の診断Code
+            MessageLog::GetInstance().AddLog(
+                "[Error] Extension | LoadLibraryW failed (" +
+                FormatWindowsLoaderError(ErrorCode) +
+                "); active module was preserved."
+            );
             return false;
         }
 
         const auto Entry = reinterpret_cast<EngineGetExtensionModuleFunction>(
             GetProcAddress(Candidate.Handle, EngineExtensionEntryPoint)
         ); //共通名から解決したModule取得関数
-        Candidate.Descriptor = Entry == nullptr
-            ? nullptr
-            : Entry(EngineExtensionAbiVersion);
+        if (Entry == nullptr)
+        {
+            const DWORD ErrorCode = GetLastError(); //GetProcAddress失敗直後の診断Code
+            ReleaseModule(Candidate);
+            MessageLog::GetInstance().AddLog(
+                "[Error] Extension | EngineGetExtensionModule export was not found (" +
+                FormatWindowsLoaderError(ErrorCode) +
+                "); active module was preserved."
+            );
+            return false;
+        }
+
+        Candidate.Descriptor = Entry(EngineExtensionAbiVersion);
 
         if (Candidate.Descriptor == nullptr ||
             Candidate.Descriptor->Size < sizeof(EngineExtensionModuleDescriptor) ||
@@ -989,7 +1141,11 @@ namespace Engine
             Candidate.Descriptor->Update == nullptr)
         {
             ReleaseModule(Candidate);
-            MessageLog::GetInstance().AddLog("[Error] Extension | DLL ABI validation failed; active module was preserved.");
+            MessageLog::GetInstance().AddLog(
+                "[Error] Extension | DLL ABI validation failed for requested ABI " +
+                std::to_string(EngineExtensionAbiVersion) +
+                "; active module was preserved."
+            );
             return false;
         }
 

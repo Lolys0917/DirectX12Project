@@ -6,6 +6,8 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v2.40  Renderable ObjectのGPU初期化状態読取APIを追加
+//||  2026_08_19  v2.30  Scene内で一意なObject名索引と名前単独検索APIを追加
 //||  2026_08_17  v2.20  Object複製とObject／Component名前変更APIを追加
 //||  2026_07_13  v2.10  IRenderable Objectの描画Lifecycleを統合
 //||  2026_07_13  v2.00  強いID、Vector<Map>索引、所有者別Component索引を実装
@@ -23,20 +25,10 @@
 
 #include "Component.h"
 #include "EntityTypes.h"
-//オブジェクトインクルード
 #include "Object.h"
-#include "Sphere.h"
-
 
 namespace Engine
 {
-    struct ObjectDataPool
-    {
-        std::vector<Box> BoxObject;
-        std::vector<Sphere> SphereObject;
-        std::vector<OBJModel> ObjModel;
-    };
-
     class DirectX12;
     struct RenderContext;
 
@@ -171,6 +163,16 @@ namespace Engine
         //戻り値: 登録Object、無効または削除済みIDの場合はnullptr
         const Object* FindObject(ObjectID objectID) const;
 
+        //Scene内で一意な解決済み名からObjectを平均O(1)で検索する
+        //引数: resolvedName 解決済み名
+        //戻り値: 見つかったObject、未登録時はnullptr
+        Object* FindObject(const std::string& resolvedName);
+
+        //Scene内で一意な解決済み名から読み取り専用Objectを平均O(1)で検索する
+        //引数: resolvedName 解決済み名
+        //戻り値: 見つかったObject、未登録時はnullptr
+        const Object* FindObject(const std::string& resolvedName) const;
+
         //型×解決済み名からObjectを平均O(1)で検索する
         //引数: objectType Object型、resolvedName 解決済み名
         //戻り値: 見つかったObject、未登録時はnullptr
@@ -260,6 +262,11 @@ namespace Engine
         //戻り値: tombstoneを除くComponent数
         std::size_t GetComponentCount() const;
 
+        //指定Renderable ObjectのGPU初期化が完了しているか確認する
+        //引数: objectID 確認対象Object
+        //戻り値: 登録済みRenderable Objectの初期化が完了している場合はtrue
+        bool IsRenderableObjectInitialized(ObjectID objectID) const;
+
     private:
         struct ComponentLocation
         {
@@ -268,13 +275,10 @@ namespace Engine
             Component* Pointer = nullptr; //Objectが所有するComponentへの非所有参照
         };
 
-        //Object型と希望名から同型内で一意な名前を解決する
-        //引数: objectType Object型、requestedName 希望名
+        //希望名からScene内で一意なObject名を解決する
+        //引数: requestedName 希望名
         //戻り値: 空名を補正し必要なら_数値を加えた名前
-        std::string ResolveObjectName(
-            ObjectType objectType,
-            const std::string& requestedName
-        );
+        std::string ResolveObjectName(const std::string& requestedName);
 
         //Object型が索引範囲内か判定する
         //引数: objectType 判定するObject型
@@ -291,8 +295,8 @@ namespace Engine
         std::vector<std::unique_ptr<Object>> ObjectsByID; //ObjectIDを直接slotに使う所有配列
         std::vector<bool> RenderableObjectInitializedByID; //ObjectIDごとの描画Resource初期化状態
         std::vector<ComponentLocation> ComponentsByID; //ComponentIDを直接slotに使う位置配列
-        std::vector<std::unordered_map<std::string, ObjectID>> ObjectIDByNameByType; //型×名前のObject索引
-        std::vector<std::unordered_map<std::string, std::uint32_t>> ObjectSuffixByNameByType; //型×基底名の次回接尾辞
+        std::unordered_map<std::string, ObjectID> ObjectIDByName; //Scene内で一意な名前のObject索引
+        std::unordered_map<std::string, std::uint32_t> ObjectSuffixByName; //基底名ごとの次回接尾辞
         std::size_t ObjectCount; //tombstoneを除くObject数
         std::size_t ComponentCount; //tombstoneを除くComponent数
     };

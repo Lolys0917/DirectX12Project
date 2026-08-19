@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.30  GPU Textureを明示的に解放するResetを追加
 //||  2026_07_13  v1.20  関数宣言コメントを規則へ統一
 //||  2026_07_13  v1.10  COM初期化責務をアプリケーションへ分離
 //||  2026_06_01  v1.00  新規作成
@@ -54,6 +55,9 @@ namespace Engine
         bool CreateWhiteTexture(
             DirectX12& dx12
         );
+
+        //所有するTexture ResourceとSRVを解放する
+        void Reset();
 
         ID3D12DescriptorHeap* GetSRVHeap() const;
         D3D12_GPU_DESCRIPTOR_HANDLE GetSRVGPUHandle() const;

@@ -1,6 +1,6 @@
 # Background Compile・Hot Reload・外部APIメモ
 
-更新日: 2026-08-18
+更新日: 2026-08-19
 
 ## 実装場所
 
@@ -11,7 +11,8 @@
 | Native内部の読取・編集Facade | `EngineAPI.h` / `EngineAPI.cpp` |
 | 自動保存、簡易構文判定、Background MSBuild | `ProgramWorkspace.h` / `ProgramWorkspace.cpp` |
 | ProgramタブのDebounce、コード補完、結果表示、反映要求 | `WinApp.h` / `WinApp.cpp` |
-| Programタブから作成・Attachする試験API | `Programs/ExtensionMain.cpp` |
+| Sceneごとの簡易Main Program | `Programs/MainScene.cpp` |
+| Main Programから隠蔽するDLL Adapter | `Templates/EngineExtension/MainProgramAdapter.cpp` |
 | Program DLLビルド定義 | `Programs/UserPrograms.vcxproj` |
 | Object ScriptタブのBox・Keyboard・色変更例 | `ScriptPrograms/BoxKeyboardColorScript.cpp` |
 | Object Script用の簡易Gameplay API | `GameScriptAPI.h` |
@@ -28,8 +29,8 @@
 2. 通常文字列、文字Literal、行・ブロックコメントを除外して `()[]{}` の対応を調べ、未完成コードを模倣判定する。
 3. 保存完了と判定通過後だけMSBuildをCompile Workerで実行する。編集UI、保存、Game Runtimeは互いを待たない。
 4. 成功DLLを `Programs/.hotreload/UserPrograms_<revision>_<time>.dll` へ複写する。
-5. メインスレッドのフレーム境界でDLLとABIを検証する。
-6. 旧Module状態をByte列へ保存し、新Moduleへ復元してから旧DLLを解放する。
+5. メインスレッドのフレーム境界でDLLとABIを検証し、Scene名に対応する`Init`を呼ぶ。
+6. Active Sceneだけ`Update`し、Scene削除、Hot Reload又はDLL解放時に`End`を呼ぶ。
 7. 失敗時は稼働中の旧DLLを残す。
 
 手動コンパイルボタンも同じBackground経路を使い、Debounceだけを省略する。自動処理は実コンパイラの代用ではないため、簡易判定後の型・Link ErrorはMSBuild診断へ表示する。
@@ -44,6 +45,23 @@ Program入力中は2文字以上のPrefixに対してC++キーワード、外部
 
 `EngineHostAPI` はScene、Object、Componentの列挙と情報取得に加え、Scene有効化、View Scene変更、Object作成・削除・名前・有効状態・Transform・親、Component削除・名前・有効状態を編集できる。IDは外部では32bit整数、Native内部では強いID型として検証される。
 
+Main Program向けの`GameEngineAPI.h`は、このC ABIを文字列中心の組込みC++ APIへ包む。Scene内のObject名は型に関係なく一意で、呼出時に名前から安定IDへ解決する。通常のSceneコードはHost PointerとIDを保持せず、次の高級APIだけで記述する。
+
+```cpp
+using namespace EngineGame;
+
+void Game::MainScene::Init()
+{
+    AddObject.CreateCapsuleModel("PlayerCapsule");
+    Object.SetSize("PlayerCapsule", 1.0f, 2.0f, 1.0f);
+    Object.SetPosition("PlayerCapsule", 0.0f, 1.0f, 0.0f);
+}
+```
+
+各Scene Sourceは`Init()`、`Update(float deltaTime)`、`End()`と末尾の`ENGINE_REGISTER_SCENE`だけを持つ。DLL Export、Instance作成、Scene ID解決は固定Adapterが担当する。`SetSize`の3値はX幅、Y高さ、Z奥行きである。CapsuleとCylinderはX/Zの大きい方を直径、Yを全高として使用し、Sphere系は最大軸を直径として使用する。
+
+上級者は`Advanced.Host()`から追記専用`EngineHostAPI`を取得し、Scene、Object、Component、Scriptなど既存の低Level APIへ到達できる。旧形式の明示Hostコード向けに`EngineProgramAPI`も互換入口として残す。
+
 ゲーム組込み向けとして、Engine RevisionとMain／View Scene ID取得、名前によるScene／Object検索、Scene作成・複製・削除・Main切替、Child列挙、Object複製、Script一覧とAttachを末尾へ追記した。`GameObjectTemplate` はGameplay Tag、移動速度、最大体力を持ち、Nativeと外部C APIの両方から作成・読取・編集・複製できる。
 
 PrimitiveのRGBA色を読み書きする `GetObjectColor`／`SetObjectColor` と、Virtual Keyの押下を読む `IsKeyDown` も末尾へ追記した。Object Script側には所有Objectの型、色、Keyboard状態を扱う同等APIがある。
@@ -51,6 +69,8 @@ PrimitiveのRGBA色を読み書きする `GetObjectColor`／`SetObjectColor` と
 色はRGBを置換する`SetObjectColor`／`SetColor`と、現在色へRGBA係数を掛ける`MultiplyObjectColor`／`MultiplyColor`の二系統を持つ。`SetProgramSuggestion`は外部Main DLLからC++識別子をコード補完へ追加する。
 
 Native C++側では `EngineAPI` に同等の `Get*IDs`、`TryGet*Info`、`Set*`、`Rename*`、`Remove*` を用意している。将来の改造WindowはこのFacade又は `EngineHostAPI` のどちらからでも構築できる。
+
+Visual Scriptingでは`GameEngineAPI.h`の呼出をコード生成先とし、C ABIの関数名・引数型をNode定義の安定キーにする。コードからGraphを生成する段階ではこの組込みAPI呼出だけを抽出し、Graphからコードを生成する段階では同じ呼出へ戻す。実行中Flow表示はNode IDを別途実行Traceへ記録する層で行い、Engine内部状態やDLL ABIへUI固有型を混入させない。
 
 ## DLLとLIB差し替え方針
 

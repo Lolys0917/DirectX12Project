@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v2.10  GPU Resource準備状態の読取APIを追加
 //||  2026_07_13  v2.00  共通Color MeshのGPU BufferとPipeline描画を実装
 //||  2026_07_13  v1.10  命名と宣言コメントを規則へ統一
 //||  2026_06_01  v1.00  新規作成
@@ -72,6 +73,10 @@ namespace Engine
 
         uint32_t GetVertexCount() const;
         uint32_t GetIndexCount() const;
+
+        //CPU Meshと一致するGPU Resourceが描画可能か確認する
+        //戻り値 : Resource作成済みかつCPU変更後の再生成が不要な場合はtrue
+        bool IsGPUResourceReady() const;
 
     private:
         //World行列を受け取るRoot Constants用RootSignatureを作成する

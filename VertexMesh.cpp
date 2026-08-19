@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v2.20  GPU Resource準備状態の読取APIを追加
 //||  2026_07_13  v2.10  Mesh Resource作成と遅延再生成失敗をMessageLogへ記録
 //||  2026_07_13  v2.00  Upload BufferとRoot Constantsによる共通描画を実装
 //||  2026_07_13  v1.10  命名と宣言コメントを規則へ統一
@@ -310,6 +311,13 @@ float4 PSMain(VSOutput input) : SV_TARGET
         IndexBufferView = {};
         GPUResourceReady = false;
         GPUResourceDirty = true;
+    }
+
+    //CPU Meshと一致するGPU Resourceが描画可能か確認する
+    //戻り値 : Resource作成済みかつCPU変更後の再生成が不要な場合はtrue
+    bool VertexMesh::IsGPUResourceReady() const
+    {
+        return GPUResourceReady && !GPUResourceDirty;
     }
 
     //World行列を受け取るRoot Constants用RootSignatureを作成する

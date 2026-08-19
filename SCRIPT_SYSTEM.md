@@ -1,6 +1,6 @@
 # Main／Sub プログラム構成
 
-更新日: 2026-08-17
+更新日: 2026-08-19
 
 ## Main プログラム
 
@@ -8,7 +8,7 @@
 
 エディターの「メイン」タブは `Programs/` を編集し、`EngineGetExtensionModule` を公開するMain DLLを生成する。Mainは各フレームで最初に1回実行され、その後にActive Scene、Object、Component、Sub Scriptが更新される。この順序により、Mainで変更したSceneやObjectの状態を同じフレームのSub Scriptから参照できる。
 
-`MainScene` はMainプログラム例である。Scene基底の更新を維持したまま、`ObjectManager` の型×名前検索を通じてデモObjectを直接回転させる。
+`MainScene` はMainプログラム例である。Scene基底の更新を維持したまま、`ObjectManager` のScene内一意名検索を通じてデモObjectを直接回転させる。
 
 ## Sub プログラム
 

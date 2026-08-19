@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  DLL LoaderのWindows Error診断を追加
 //||  2026_08_17  v1.00  新規作成
 //||
 
@@ -30,6 +31,71 @@ namespace Engine
 {
     namespace
     {
+        //概要：Windows LoaderのError Codeを診断可能な一行文字列へ変換する
+        //引数：errorCode=GetLastErrorが返した値
+        //戻り値：数値CodeとSystem Messageを含む文字列
+        std::string FormatWindowsLoaderError(DWORD errorCode)
+        {
+            LPWSTR Buffer = nullptr; //FormatMessageが確保するUnicode System Message
+            const DWORD Length = FormatMessageW(
+                FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                FORMAT_MESSAGE_FROM_SYSTEM |
+                FORMAT_MESSAGE_IGNORE_INSERTS,
+                nullptr,
+                errorCode,
+                0,
+                reinterpret_cast<LPWSTR>(&Buffer),
+                0,
+                nullptr
+            ); //System MessageのByte数
+            std::string Message = "Windows error " + std::to_string(errorCode); //必ず残す数値情報
+
+            if (Length != 0 && Buffer != nullptr)
+            {
+                std::wstring Detail(Buffer, Length); //改行を除去するSystem Message
+
+                while (!Detail.empty() &&
+                    (Detail.back() == L'\r' || Detail.back() == L'\n' || Detail.back() == L' '))
+                {
+                    Detail.pop_back();
+                }
+
+                const int ByteCount = WideCharToMultiByte(
+                    CP_UTF8,
+                    0,
+                    Detail.data(),
+                    static_cast<int>(Detail.size()),
+                    nullptr,
+                    0,
+                    nullptr,
+                    nullptr
+                ); //UTF-8変換後Byte数
+
+                if (ByteCount > 0)
+                {
+                    std::string Utf8Detail(ByteCount, '\0'); //MessageLogへ渡すUTF-8詳細
+                    WideCharToMultiByte(
+                        CP_UTF8,
+                        0,
+                        Detail.data(),
+                        static_cast<int>(Detail.size()),
+                        Utf8Detail.data(),
+                        ByteCount,
+                        nullptr,
+                        nullptr
+                    );
+                    Message += ": " + Utf8Detail;
+                }
+            }
+
+            if (Buffer != nullptr)
+            {
+                LocalFree(Buffer);
+            }
+
+            return Message;
+        }
+
         struct DynamicScriptDescriptor final
         {
             std::string TypeKey; //Module内Script識別子
@@ -662,8 +728,10 @@ namespace Engine
 
         if (Handle == nullptr)
         {
+            const DWORD ErrorCode = GetLastError(); //LoadLibrary失敗直後の診断Code
             MessageLog::GetInstance().AddLog(
-                "[Error] ScriptModule | LoadLibraryW failed."
+                "[Error] ScriptModule | LoadLibraryW failed (" +
+                FormatWindowsLoaderError(ErrorCode) + ")."
             );
             return false;
         }
@@ -674,9 +742,11 @@ namespace Engine
 
         if (EntryPoint == nullptr)
         {
+            const DWORD ErrorCode = GetLastError(); //GetProcAddress失敗直後の診断Code
             FreeLibrary(Handle);
             MessageLog::GetInstance().AddLog(
-                "[Error] ScriptModule | EngineGetScriptModule export was not found."
+                "[Error] ScriptModule | EngineGetScriptModule export was not found (" +
+                FormatWindowsLoaderError(ErrorCode) + ")."
             );
             return false;
         }

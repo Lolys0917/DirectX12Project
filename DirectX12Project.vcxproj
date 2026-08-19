@@ -154,8 +154,10 @@
     <ClInclude Include="EditorTypes.h" />
     <ClInclude Include="Engine.h" />
     <ClInclude Include="EngineAPI.h" />
+    <ClInclude Include="EngineDiagnostics.h" />
     <ClInclude Include="EngineExtensionAPI.h" />
     <ClInclude Include="EntityTypes.h" />
+    <ClInclude Include="GameEngineAPI.h" />
     <ClInclude Include="GameScriptAPI.h" />
     <ClInclude Include="GameRuntime.h" />
     <ClInclude Include="ExtensionSystem.h" />
@@ -205,6 +207,7 @@
     <ClCompile Include="Cylinder.cpp" />
     <ClCompile Include="DirectX12.cpp" />
     <ClCompile Include="EngineAPI.cpp" />
+    <ClCompile Include="EngineDiagnostics.cpp" />
     <ClCompile Include="ExtensionSystem.cpp" />
     <ClCompile Include="FrameRateController.cpp" />
     <ClCompile Include="GameApp.cpp" />
@@ -228,6 +231,8 @@
     <ClCompile Include="PrimitiveObject.cpp" />
     <ClCompile Include="RenderTexture.cpp" />
     <ClCompile Include="RotationScript.cpp" />
+    <ClCompile Include="Script.cpp" />
+    <ClCompile Include="ScriptSystem.cpp" />
     <ClCompile Include="Scene.cpp" />
     <ClCompile Include="SceneManager.cpp" />
     <ClCompile Include="Sphere.cpp" />
@@ -257,6 +262,7 @@
     <None Include="ENGINE_EXTENSION_GUIDE.md" />
     <None Include="GAMEPLAY_API_GUIDE.md" />
     <None Include="SCRIPT_SYSTEM.md" />
+    <None Include="Templates\EngineExtension\MainProgramAdapter.cpp" />
     <None Include="Templates\ObjectScript\README.md" />
     <None Include="Templates\ObjectScript\BoxKeyboardColorScript.cpp" />
   </ItemGroup>

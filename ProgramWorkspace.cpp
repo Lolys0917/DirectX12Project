@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  組込み名前API Templateと静的Debug CRT DLL生成へ更新
 //||  2026_08_17  v1.00  新規作成
 //||
 
@@ -175,6 +176,30 @@ namespace Engine
             return Result;
         }
 
+        //概要：UTF-8文字列をC++の二重引用符内へ安全に埋め込める形へ変換する
+        //引数：text=変換する文字列
+        //戻り値：Backslash、引用符、改行をEscapeした文字列
+        std::string EscapeCppString(const std::string& text)
+        {
+            std::string Result; //C++文字列Literalへ埋め込む内容
+            Result.reserve(text.size());
+
+            for (char Character : text)
+            {
+                switch (Character)
+                {
+                case '\\': Result += "\\\\"; break;
+                case '"': Result += "\\\""; break;
+                case '\r': Result += "\\r"; break;
+                case '\n': Result += "\\n"; break;
+                case '\t': Result += "\\t"; break;
+                default: Result.push_back(Character); break;
+                }
+            }
+
+            return Result;
+        }
+
         //概要：MSBuild Command Lineへ渡すPathを二重引用符で囲む
         //引数：path=引用するPath
         //戻り値：空白を含んでも一引数になる文字列
@@ -248,8 +273,8 @@ namespace Engine
             (ScriptWorkspace ? L"UserScripts.vcxproj" : L"UserPrograms.vcxproj");
         std::error_code Error; //例外を使用しないDirectory作成結果
         std::filesystem::create_directories(ProgramDirectory, Error);
-        std::filesystem::path ExtensionTemplate; //外部API Entry Pointを持つ既定Source
-        return !Error && WriteBuildProject() && EnsureExtensionTemplate(ExtensionTemplate);
+        std::filesystem::path DefaultSource; //Workspace種別に対応する既定Source
+        return !Error && WriteBuildProject() && EnsureDefaultSource(DefaultSource);
     }
 
     //概要：WorkspaceがMain Program又はObject Scriptのどちらを扱うか取得する
@@ -312,7 +337,7 @@ namespace Engine
         return Result;
     }
 
-    //概要：重複しないNewProgram.cppを作成する
+    //概要：重複しないNewScene.cpp又はNewScript.cppを作成する
     //引数：createdPath=作成したPathの格納先
     //戻り値：新しいProgramファイルを保存できた場合はtrue
     bool ProgramWorkspace::CreateSourceFile(std::filesystem::path& createdPath)
@@ -324,16 +349,18 @@ namespace Engine
 
         const bool ScriptWorkspace = Kind == ProgramWorkspaceKind::ObjectScript; //Script雛形を作る場合true
         std::filesystem::path Candidate = ProgramDirectory /
-            (ScriptWorkspace ? L"NewScript.cpp" : L"NewProgram.cpp"); //新規ファイル候補
+            (ScriptWorkspace ? L"NewScript.cpp" : L"NewScene.cpp"); //新規ファイル候補
         std::error_code Error; //存在確認結果
         unsigned int Suffix = 1; //同名時に付加する番号
 
         while (std::filesystem::exists(Candidate, Error) && !Error)
         {
             Candidate = ProgramDirectory /
-                (std::wstring(ScriptWorkspace ? L"NewScript_" : L"NewProgram_") +
+                (std::wstring(ScriptWorkspace ? L"NewScript_" : L"NewScene_") +
                     std::to_wstring(Suffix++) + L".cpp");
         }
+
+        const std::wstring SourceIdentifier = Candidate.stem().wstring(); //重複番号込み識別子
 
         const std::wstring Template = ScriptWorkspace
             ? L"#include \"ScriptModuleAPI.h\"\r\n\r\n"
@@ -345,17 +372,22 @@ namespace Engine
               L"    (void)instance;\r\n"
               L"    (void)deltaTime;\r\n"
               L"}\r\n"
-            : L"#include \"EngineExtensionAPI.h\"\r\n\r\n"
-              L"namespace Game\r\n"
+            : L"#include \"GameEngineAPI.h\"\r\n\r\n"
+              L"using namespace EngineGame;\r\n\r\n"
+              L"namespace Game::" + SourceIdentifier + L"\r\n"
               L"{\r\n"
-              L"    //概要：新しいMain Program処理を実行する\r\n"
-              L"    //引数：host=版番号付き外部Engine API関数表\r\n"
-              L"    //戻り値：なし\r\n"
-              L"    void ConfigureProgram(const EngineHostAPI* host)\r\n"
+              L"    void Init()\r\n"
               L"    {\r\n"
-              L"        (void)host;\r\n"
+              L"    }\r\n\r\n"
+              L"    void Update(float deltaTime)\r\n"
+              L"    {\r\n"
+              L"        (void)deltaTime;\r\n"
+              L"    }\r\n\r\n"
+              L"    void End()\r\n"
+              L"    {\r\n"
               L"    }\r\n"
-              L"}\r\n"; //Workspace種別に対応する新規Source初期内容
+              L"}\r\n\r\n"
+              L"ENGINE_REGISTER_SCENE(" + SourceIdentifier + L")\r\n"; //Workspace種別に対応するSource初期内容
 
         if (!SaveSourceFile(Candidate, Template))
         {
@@ -396,18 +428,27 @@ namespace Engine
         }
 
         const std::wstring WideIdentifier = Utf8ToWide(Identifier); //C++関数名用Scene識別子
+        const std::wstring WideSceneName = Utf8ToWide(
+            EscapeCppString(sceneName)
+        ); //Engine上の実Scene名
         const std::wstring Template =
-            L"#include \"EngineExtensionAPI.h\"\r\n\r\n"
-            L"namespace Game\r\n"
+            L"#include \"GameEngineAPI.h\"\r\n\r\n"
+            L"using namespace EngineGame;\r\n\r\n"
+            L"namespace Game::" + WideIdentifier + L"\r\n"
             L"{\r\n"
-            L"    //概要：" + WideIdentifier + L"のMain Programを構成する\r\n"
-            L"    //引数：host=版番号付き外部Engine API関数表\r\n"
-            L"    //戻り値：なし\r\n"
-            L"    void Configure" + WideIdentifier + L"(const EngineHostAPI* host)\r\n"
+            L"    void Init()\r\n"
             L"    {\r\n"
-            L"        (void)host;\r\n"
+            L"    }\r\n\r\n"
+            L"    void Update(float deltaTime)\r\n"
+            L"    {\r\n"
+            L"        (void)deltaTime;\r\n"
+            L"    }\r\n\r\n"
+            L"    void End()\r\n"
+            L"    {\r\n"
             L"    }\r\n"
-            L"}\r\n"; //Scene作成時に生成するMain Program雛形
+            L"}\r\n\r\n"
+            L"ENGINE_REGISTER_NAMED_SCENE(" + WideIdentifier + L", \"" +
+            WideSceneName + L"\")\r\n"; //Scene作成時に生成するMain Program雛形
         return SaveSourceFile(sourcePath, Template);
     }
 
@@ -611,18 +652,18 @@ namespace Engine
         Saving.store(false);
     }
 
-    //概要：外部API Entry Pointと状態移行例を持つProgram Sourceを必要時だけ生成する
-    //引数：sourcePath=既存又は生成したExtension Source Pathの格納先
-    //戻り値：外部API Templateを使用可能にできた場合はtrue
-    bool ProgramWorkspace::EnsureExtensionTemplate(std::filesystem::path& sourcePath)
+    //概要：Main Scene又はObject Scriptの既定Sourceを必要時だけ生成する
+    //引数：sourcePath=既存又は生成した既定Source Pathの格納先
+    //戻り値：Workspace既定Sourceを使用可能にできた場合はtrue
+    bool ProgramWorkspace::EnsureDefaultSource(std::filesystem::path& sourcePath)
     {
         if (Kind == ProgramWorkspaceKind::ObjectScript)
         {
             return EnsureScriptTemplate(sourcePath);
         }
 
-        sourcePath = ProgramDirectory / L"ExtensionMain.cpp";
-        std::error_code Error; //Template存在確認結果
+        sourcePath = ProgramDirectory / L"MainScene.cpp";
+        std::error_code Error; //既存Scene Source確認結果
 
         if (std::filesystem::exists(sourcePath, Error))
         {
@@ -630,114 +671,22 @@ namespace Engine
         }
 
         const std::wstring Template =
-            L"#include \"EngineExtensionAPI.h\"\r\n\r\n"
-            L"#include <cstdint>\r\n"
-            L"#include <cstring>\r\n"
-            L"#include <new>\r\n\r\n"
-            L"namespace\r\n"
+            L"#include \"GameEngineAPI.h\"\r\n\r\n"
+            L"using namespace EngineGame;\r\n\r\n"
+            L"namespace Game::MainScene\r\n"
             L"{\r\n"
-            L"    struct ProgramState final\r\n"
+            L"    void Init()\r\n"
             L"    {\r\n"
-            L"        const EngineHostAPI* Host = nullptr;\r\n"
-            L"        std::uint64_t UpdateCount = 0;\r\n"
-            L"    };\r\n\r\n"
-            L"    //概要：外部Program Instanceを作成してEngine読取編集APIを試験する\r\n"
-            L"    //引数：host=版番号付きEngine API関数表\r\n"
-            L"    //戻り値：作成したProgram状態、API不整合又は確保失敗時はnullptr\r\n"
-            L"    void* ENGINE_EXTENSION_CALL CreateProgram(const EngineHostAPI* host)\r\n"
-            L"    {\r\n"
-            L"        if (host == nullptr || host->Size < sizeof(EngineHostAPI) ||\r\n"
-            L"            host->AbiVersion != EngineExtensionAbiVersion)\r\n"
-            L"        {\r\n"
-            L"            return nullptr;\r\n"
-            L"        }\r\n\r\n"
-            L"        ProgramState* State = new (std::nothrow) ProgramState{};\r\n\r\n"
-            L"        if (State == nullptr)\r\n"
-            L"        {\r\n"
-            L"            return nullptr;\r\n"
-            L"        }\r\n\r\n"
-            L"        State->Host = host;\r\n"
-            L"        EngineExternalSceneInfo Scene{};\r\n"
-            L"        Scene.Size = sizeof(EngineExternalSceneInfo);\r\n\r\n"
-            L"        if (host->GetSceneCount(host->Context) > 0 &&\r\n"
-            L"            host->GetSceneInfo(host->Context, 0, &Scene))\r\n"
-            L"        {\r\n"
-            L"            host->SetSceneActive(host->Context, Scene.SceneID, Scene.Active);\r\n"
-            L"        }\r\n\r\n"
-            L"        host->AddLog(host->Context, \"[Info] ExternalProgram | Test API attached from Program tab.\");\r\n"
-            L"        return State;\r\n"
             L"    }\r\n\r\n"
-            L"    //概要：外部Program Instanceを破棄する\r\n"
-            L"    //引数：instance=CreateProgramが返した状態\r\n"
-            L"    //戻り値：なし\r\n"
-            L"    void ENGINE_EXTENSION_CALL DestroyProgram(void* instance)\r\n"
+            L"    void Update(float deltaTime)\r\n"
             L"    {\r\n"
-            L"        delete static_cast<ProgramState*>(instance);\r\n"
+            L"        (void)deltaTime;\r\n"
             L"    }\r\n\r\n"
-            L"    //概要：ObjectへAttachしたScriptとは独立したMain Program処理を毎Frame実行する\r\n"
-            L"    //引数：instance=Program状態、deltaTime=前回更新からの秒数\r\n"
-            L"    //戻り値：なし\r\n"
-            L"    void ENGINE_EXTENSION_CALL UpdateProgram(void* instance, float deltaTime)\r\n"
+            L"    void End()\r\n"
             L"    {\r\n"
-            L"        ProgramState* State = static_cast<ProgramState*>(instance);\r\n"
-            L"        (void)deltaTime;\r\n\r\n"
-            L"        if (State != nullptr)\r\n"
-            L"        {\r\n"
-            L"            ++State->UpdateCount;\r\n"
-            L"        }\r\n"
-            L"    }\r\n\r\n"
-            L"    //概要：Hot Reloadで引き継ぐ状態Byte数を取得する\r\n"
-            L"    //引数：instance=Program状態\r\n"
-            L"    //戻り値：保存するUpdateCountのByte数\r\n"
-            L"    std::uint32_t ENGINE_EXTENSION_CALL GetProgramStateSize(void* instance)\r\n"
-            L"    {\r\n"
-            L"        return instance == nullptr ? 0u : static_cast<std::uint32_t>(sizeof(std::uint64_t));\r\n"
-            L"    }\r\n\r\n"
-            L"    //概要：Hot Reload前のProgram状態をEngine所有Bufferへ保存する\r\n"
-            L"    //引数：instance=Program状態、destination=保存先、destinationSize=保存先Byte数\r\n"
-            L"    //戻り値：状態を保存できた場合はtrue\r\n"
-            L"    bool ENGINE_EXTENSION_CALL SaveProgramState(void* instance, void* destination, std::uint32_t destinationSize)\r\n"
-            L"    {\r\n"
-            L"        if (instance == nullptr || destination == nullptr || destinationSize < sizeof(std::uint64_t))\r\n"
-            L"        {\r\n"
-            L"            return false;\r\n"
-            L"        }\r\n\r\n"
-            L"        std::memcpy(destination, &static_cast<ProgramState*>(instance)->UpdateCount, sizeof(std::uint64_t));\r\n"
-            L"        return true;\r\n"
-            L"    }\r\n\r\n"
-            L"    //概要：Hot Reload後のProgram Instanceへ旧状態を復元する\r\n"
-            L"    //引数：instance=新Program状態、source=旧状態Buffer、sourceSize=旧状態Byte数\r\n"
-            L"    //戻り値：状態を復元できた場合はtrue\r\n"
-            L"    bool ENGINE_EXTENSION_CALL LoadProgramState(void* instance, const void* source, std::uint32_t sourceSize)\r\n"
-            L"    {\r\n"
-            L"        if (instance == nullptr || source == nullptr || sourceSize < sizeof(std::uint64_t))\r\n"
-            L"        {\r\n"
-            L"            return false;\r\n"
-            L"        }\r\n\r\n"
-            L"        std::memcpy(&static_cast<ProgramState*>(instance)->UpdateCount, source, sizeof(std::uint64_t));\r\n"
-            L"        return true;\r\n"
             L"    }\r\n"
             L"}\r\n\r\n"
-            L"//概要：Engineが共通名から取得する版番号付き外部Module定義を返す\r\n"
-            L"//引数：requestedAbiVersion=Engineが要求するC ABI版番号\r\n"
-            L"//戻り値：互換Module定義、版不一致時はnullptr\r\n"
-            L"ENGINE_EXTENSION_EXPORT const EngineExtensionModuleDescriptor* ENGINE_EXTENSION_CALL EngineGetExtensionModule(std::uint32_t requestedAbiVersion)\r\n"
-            L"{\r\n"
-            L"    static const EngineExtensionModuleDescriptor Descriptor\r\n"
-            L"    {\r\n"
-            L"        sizeof(EngineExtensionModuleDescriptor),\r\n"
-            L"        EngineExtensionAbiVersion,\r\n"
-            L"        \"ProgramTabTestAPI\",\r\n"
-            L"        1,\r\n"
-            L"        CreateProgram,\r\n"
-            L"        DestroyProgram,\r\n"
-            L"        UpdateProgram,\r\n"
-            L"        GetProgramStateSize,\r\n"
-            L"        SaveProgramState,\r\n"
-            L"        LoadProgramState\r\n"
-            L"    };\r\n"
-            L"    return requestedAbiVersion == EngineExtensionAbiVersion ? &Descriptor : nullptr;\r\n"
-            L"}\r\n"; //Program Tabから編集する外部API試験Template
+            L"ENGINE_REGISTER_SCENE(MainScene)\r\n"; //既定Main Scene雛形
         return SaveSourceFile(sourcePath, Template);
     }
 
@@ -1562,8 +1511,15 @@ namespace Engine
         Xml << L"  <PropertyGroup Label=\"Configuration\"><ConfigurationType>DynamicLibrary</ConfigurationType><UseDebugLibraries>true</UseDebugLibraries><PlatformToolset>v143</PlatformToolset><CharacterSet>Unicode</CharacterSet></PropertyGroup>\n";
         Xml << L"  <Import Project=\"$(VCTargetsPath)\\Microsoft.Cpp.props\" />\n";
         Xml << L"  <PropertyGroup><OutDir>$(MSBuildThisFileDirectory).build\\$(Platform)\\$(Configuration)\\</OutDir><IntDir>$(MSBuildThisFileDirectory).build\\$(Platform)\\$(Configuration)\\obj\\</IntDir></PropertyGroup>\n";
-        Xml << L"  <ItemDefinitionGroup><ClCompile><WarningLevel>Level3</WarningLevel><LanguageStandard>stdcpp20</LanguageStandard><AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile><Link><SubSystem>Windows</SubSystem></Link></ItemDefinitionGroup>\n";
-        Xml << L"  <ItemGroup><ClCompile Include=\"*.cpp\" /><ClCompile Include=\"*.cxx\" /></ItemGroup>\n";
+        Xml << L"  <ItemDefinitionGroup><ClCompile><WarningLevel>Level3</WarningLevel><LanguageStandard>stdcpp20</LanguageStandard><RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary><AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories><AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions></ClCompile><Link><SubSystem>Windows</SubSystem></Link></ItemDefinitionGroup>\n";
+        Xml << L"  <ItemGroup><ClCompile Include=\"*.cpp\" /><ClCompile Include=\"*.cxx\" />";
+
+        if (!ScriptWorkspace)
+        {
+            Xml << L"<ClCompile Include=\"..\\Templates\\EngineExtension\\MainProgramAdapter.cpp\" />";
+        }
+
+        Xml << L"</ItemGroup>\n";
         Xml << L"  <Import Project=\"$(VCTargetsPath)\\Microsoft.Cpp.targets\" />\n";
         Xml << L"</Project>\n";
         return SaveSourceFile(BuildProjectPath, Xml.str());

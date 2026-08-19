@@ -6,6 +6,8 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.30  Scene基底の構築Hookを明示的に実行
+//||  2026_08_19  v1.20  Demo Objectを関数内の登録済みPointerとして安全に初期化
 //||  2026_08_17  v1.10  Global Pointerを削除しObjectManager経由の更新へ修正
 //||  2026_07_13  v1.00  新規作成: DemoModel生成をGameAppからSceneへ移動
 //||
@@ -20,7 +22,6 @@
 #include "Object.h"
 #include "ObjectManager.h"
 #include "OBJModel.h"
-#include "Box.h"
 
 
 namespace Engine
@@ -36,14 +37,18 @@ namespace Engine
     // 戻り値: DemoModelの構築と読み込みに成功した場合はtrue
     bool MainScene::OnCreateSceneObjects(DirectX12& dx12)
     {
+        if (!Scene::OnCreateSceneObjects(dx12))
+        {
+            return false;
+        }
+
         ObjectManager& Objects =
             GetObjectManager(); // MainScene専用ObjectManager
         Object* DemoObject =
             Objects.CreateObject<Object>("DemoModel"); // DemoModelを所有するObject
-        DemoObject1 =
-            Objects.CreateObject<Box>("DemoBox");
+        Box* DemoBox = Objects.CreateObject<Box>("DemoBox"); //追加表示するBox Object
 
-        if (DemoObject == nullptr)
+        if (DemoObject == nullptr || DemoBox == nullptr)
         {
             MessageLog::GetInstance().AddLog(
                 "[Error] MainScene | DemoModel owner Object creation failed."
@@ -51,9 +56,9 @@ namespace Engine
             return false;
         }
 
-        DemoObject1->SetPosition(DirectX::XMFLOAT3(3.0f, 0.0f, 0.0f));
-        DemoObject1->SetScale(DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f));
-        DemoObject1->SetColor(DirectX::XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f));
+        DemoBox->SetPosition(DirectX::XMFLOAT3(3.0f, 0.0f, 0.0f));
+        DemoBox->SetScale(DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f));
+        DemoBox->SetColor(DirectX::XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f));
 
         DemoObject->SetPosition(DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f));
         DemoObject->SetScale(DirectX::XMFLOAT3(0.1f, 0.1f, 0.1f));
@@ -63,7 +68,7 @@ namespace Engine
             0.0f
         ));
 
-        DemoModel = Objects.AddComponent<OBJModel>(
+        OBJModel* DemoModel = Objects.AddComponent<OBJModel>(
             DemoObject->GetID(),
             "DemoModel"
         ); // Cat OBJを描画するModel Component
@@ -120,9 +125,8 @@ namespace Engine
         Scene::Update(deltaTime);
 
         Object* DemoObject = GetObjectManager().FindObject(
-            ObjectType::Object,
             "DemoModel"
-        ); //MainプログラムがネイティブAPIで直接操作するデモObject
+        ); //Mainプログラムが名前から直接操作するデモObject
 
         if (DemoObject == nullptr)
         {

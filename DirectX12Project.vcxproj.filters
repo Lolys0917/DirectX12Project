@@ -48,6 +48,9 @@
     <ClInclude Include="EngineAPI.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
+    <ClInclude Include="EngineDiagnostics.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
     <ClInclude Include="GameScriptAPI.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
@@ -58,6 +61,9 @@
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="EngineExtensionAPI.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
+    <ClInclude Include="GameEngineAPI.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
     <ClInclude Include="ExtensionSystem.h">
@@ -194,6 +200,9 @@
     <ClCompile Include="EngineAPI.cpp">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
+    <ClCompile Include="EngineDiagnostics.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
     <ClCompile Include="ExtensionSystem.cpp">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
@@ -311,6 +320,9 @@
       <Filter>リソース ファイル</Filter>
     </None>
     <None Include="ENGINE_EXTENSION_GUIDE.md">
+      <Filter>リソース ファイル</Filter>
+    </None>
+    <None Include="Templates\EngineExtension\MainProgramAdapter.cpp">
       <Filter>リソース ファイル</Filter>
     </None>
   </ItemGroup>

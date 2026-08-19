@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v2.30  基底契約とGPU Resourceの明示的終了を追加
 //||  2026_07_13  v2.20  Camera pass別WVPをRoot Constantsへ変更
 //||  2026_07_13  v2.10  C++変数命名と宣言コメントを規則へ統一
 //||  2026_07_13  v2.00  Component化し固定Camera依存を削除
@@ -86,6 +87,11 @@ float4 PSMain(VSOutput input) : SV_TARGET
     //Gridの終了処理を行う
     void Grid::Finalize()
     {
+        VertexBuffer.Reset();
+        PipelineState.Reset();
+        RootSignature.Reset();
+        VertexBufferView = {};
+        Component::Finalize();
     }
 
     //未登録状態のGrid定義を複製する
@@ -102,6 +108,15 @@ float4 PSMain(VSOutput input) : SV_TARGET
     //戻り値: 全Resource作成に成功した場合はtrue
     bool Grid::Initialize(DirectX12& dx12)
     {
+        if (!Component::Initialize(dx12))
+        {
+            return false;
+        }
+
+        VertexBuffer.Reset();
+        PipelineState.Reset();
+        RootSignature.Reset();
+        VertexBufferView = {};
         BuildGrid();
 
         if (!CreateRootSignature(dx12)) return false;

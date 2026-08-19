@@ -6,6 +6,9 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "DirectX12Project", "DirectX12Project.vcxproj", "{85A225AB-9D25-4E6D-8313-FDF3255B9817}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "RotationScriptModule", "Samples\RotationScriptModule\RotationScriptModule.vcxproj", "{D2B9A741-7AA8-4F24-9DF4-E6D0C7E0C5A1}"
+	ProjectSection(ProjectDependencies) = postProject
+		{85A225AB-9D25-4E6D-8313-FDF3255B9817} = {85A225AB-9D25-4E6D-8313-FDF3255B9817}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

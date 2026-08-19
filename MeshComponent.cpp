@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v2.10  Component基底の初期化と終了契約を適用
 //||  2026_07_13  v2.00  Owner姿勢を使用する共通Mesh描画へ変更
 //||  2026_07_13  v1.00  新規作成
 //||
@@ -45,6 +46,11 @@ namespace Engine
     //戻り値 : GPU資源作成要求後はtrue
     bool MeshComponent::Initialize(DirectX12& dx12)
     {
+        if (!Component::Initialize(dx12))
+        {
+            return false;
+        }
+
         if (Mesh.GetVertexCount() == 0 || Mesh.GetIndexCount() == 0)
         {
             return true;
@@ -68,6 +74,7 @@ namespace Engine
     void MeshComponent::Finalize()
     {
         Mesh.ReleaseGPUResource();
+        Component::Finalize();
     }
 
     //未登録状態の複製定義を作成する

@@ -97,7 +97,7 @@ namespace Engine
         bool PollBackgroundSave(ProgramSaveResult& result);
         bool IsSaving() const;
         void WaitForBackgroundSave();
-        bool EnsureExtensionTemplate(std::filesystem::path& sourcePath);
+        bool EnsureDefaultSource(std::filesystem::path& sourcePath);
         ProgramPreflightResult AnalyzeCompileReadiness(const std::wstring& text) const;
         ProgramCompileResult Compile(
             std::uint64_t revision = 0,

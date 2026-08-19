@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  登録状態を検証する基底初期化契約を追加
 //||  2026_07_13  v1.00  新規作成
 //||
 
@@ -28,13 +29,13 @@ namespace Engine
     //コンポーネントを破棄する
     Component::~Component() = default;
 
-    //標準コンポーネントを初期化済みにする
+    //標準コンポーネントの登録状態を検証する
     //dx12 : DirectX12基盤
-    //戻り値 : 常にtrue
+    //戻り値 : Owner、ID及び名前が登録済みの場合はtrue
     bool Component::Initialize(DirectX12& dx12)
     {
         (void)dx12;
-        return true;
+        return Owner != nullptr && ID.IsValid() && !Name.empty();
     }
 
     //標準コンポーネントを更新する

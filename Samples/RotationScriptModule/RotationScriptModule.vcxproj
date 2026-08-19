@@ -33,6 +33,9 @@
     <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir>$(SolutionDir)Samples\RotationScriptModule\$(Platform)\$(Configuration)\</IntDir>
     <TargetName>SampleRotationScript</TargetName>
+    <LocalDebuggerCommand>$(MSBuildThisFileDirectory)..\..\$(Platform)\$(Configuration)\DirectX12Project.exe</LocalDebuggerCommand>
+    <LocalDebuggerWorkingDirectory>$(MSBuildThisFileDirectory)..\..\$(Platform)\$(Configuration)\</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>

@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  Component基底の初期化と終了契約を適用
 //||  2026_08_17  v1.00  新規作成
 //||
 
@@ -40,7 +41,10 @@ namespace Engine
     //戻り値：OnAttachに成功した場合はtrue
     bool Script::Initialize(DirectX12& dx12)
     {
-        (void)dx12;
+        if (!Component::Initialize(dx12))
+        {
+            return false;
+        }
 
         if (Attached)
         {
@@ -94,6 +98,8 @@ namespace Engine
             OnDetach();
             Attached = false;
         }
+
+        Component::Finalize();
     }
 
     //概要：派生型を維持した未登録Script定義を複製する
@@ -126,6 +132,14 @@ namespace Engine
     const std::string& Script::GetDisplayName() const
     {
         return DisplayName;
+    }
+
+    //概要：Scriptが所有ObjectへのAttachを完了しているか確認する
+    //引数：なし
+    //戻り値：OnAttach成功後かつOnDetach前の場合はtrue
+    bool Script::IsAttached() const
+    {
+        return Attached;
     }
 
     //概要：ScriptのStart処理が完了しているか確認する

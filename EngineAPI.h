@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v1.10  名前指定とID指定を共有するPrimitive生成・寸法APIを追加
 //||  2026_08_17  v1.00  新規作成
 //||
 
@@ -22,6 +23,7 @@
 namespace Engine
 {
     class DirectX12;
+    class Capsule;
     class GameObjectTemplate;
     class GameApp;
     class Object;
@@ -55,6 +57,7 @@ namespace Engine
         std::vector<ObjectID> GetChildObjectIDs(SceneID sceneID, ObjectID objectID) const;
         std::vector<ComponentID> GetComponentIDs(SceneID sceneID, ObjectID objectID) const;
         SceneID FindSceneID(const std::string& name) const;
+        ObjectID FindObjectID(SceneID sceneID, const std::string& name) const;
         ObjectID FindObjectID(SceneID sceneID, ObjectType objectType, const std::string& name) const;
         bool TryGetSceneInfo(SceneID sceneID, EditorSceneInfo& information) const;
         bool TryGetObjectInfo(SceneID sceneID, ObjectID objectID, EditorObjectInfo& information) const;
@@ -63,6 +66,11 @@ namespace Engine
         Object* CreateObject(
             SceneID sceneID,
             ObjectType objectType,
+            const std::string& requestedName,
+            ObjectID parentID = ObjectID()
+        );
+        Capsule* CreateCapsuleModel(
+            SceneID sceneID,
             const std::string& requestedName,
             ObjectID parentID = ObjectID()
         );
@@ -97,6 +105,8 @@ namespace Engine
         bool RenameObject(SceneID sceneID, ObjectID objectID, const std::string& name);
         bool SetObjectActive(SceneID sceneID, ObjectID objectID, bool active);
         bool SetObjectTransform(SceneID sceneID, ObjectID objectID, const EditorTransformInfo& transform);
+        bool SetObjectSize(SceneID sceneID, ObjectID objectID, const EditorVector3& size);
+        bool SetObjectSize(SceneID sceneID, const std::string& name, const EditorVector3& size);
         bool TryGetObjectColor(SceneID sceneID, ObjectID objectID, EditorColor& color) const;
         bool SetObjectColor(SceneID sceneID, ObjectID objectID, const EditorColor& color);
         bool MultiplyObjectColor(SceneID sceneID, ObjectID objectID, const EditorColor& multiplier);

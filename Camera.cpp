@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v2.10  Component基底の初期化と終了契約を適用
 //||  2026_07_13  v2.00  Component化、専用Depth、複数Camera描画へ対応
 //||  2026_06_01  v1.00  新規作成
 //||
@@ -48,6 +49,11 @@ namespace Engine
     //戻り値: Resource作成に成功した場合はtrue
     bool Camera::Initialize(DirectX12& dx12)
     {
+        if (!Component::Initialize(dx12))
+        {
+            return false;
+        }
+
         if (OutputTexture)
         {
             return true;
@@ -118,6 +124,7 @@ namespace Engine
     void Camera::Finalize()
     {
         OutputTexture.reset();
+        Component::Finalize();
     }
 
     //未登録状態のCamera定義を複製する

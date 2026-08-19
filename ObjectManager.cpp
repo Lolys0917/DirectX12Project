@@ -6,6 +6,8 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_19  v2.50  非Active描画Objectの初期化と状態読取を追加
+//||  2026_08_19  v2.40  Object名をScene内で一意にし名前単独検索を追加
 //||  2026_08_17  v2.30  Editor用Object複製と名前索引更新処理を追加
 //||  2026_07_13  v2.20  異常な登録、索引不整合及び初期化失敗をMessageLogへ記録
 //||  2026_07_13  v2.10  IRenderable Objectの描画Lifecycleを統合
@@ -60,9 +62,7 @@ namespace Engine
 {
     //空のObject、Component ID索引を持つManagerを作成する
     ObjectManager::ObjectManager()
-        : ObjectIDByNameByType(static_cast<std::size_t>(ObjectType::Count))
-        , ObjectSuffixByNameByType(static_cast<std::size_t>(ObjectType::Count))
-        , ObjectCount(0)
+        : ObjectCount(0)
         , ComponentCount(0)
     {
         ObjectsByID.emplace_back(nullptr);
@@ -101,14 +101,14 @@ namespace Engine
         }
 
         const std::string ResolvedName = ResolveObjectName(
-            object->Type,
             requestedName
-        ); //同じObject型内で一意な登録名
+        ); //Scene内で一意な登録名
 
         const ObjectID NewID(static_cast<std::uint32_t>(ObjectsByID.size())); //再利用しない新規Object ID
-        auto& NameMap = ObjectIDByNameByType[static_cast<std::size_t>(object->Type)]; //対象型の名前索引
-
-        const auto InsertResult = NameMap.emplace(ResolvedName, NewID); //型×名前索引への登録結果
+        const auto InsertResult = ObjectIDByName.emplace(
+            ResolvedName,
+            NewID
+        ); //Scene内名前索引への登録結果
 
         if (!InsertResult.second)
         {
@@ -231,8 +231,7 @@ namespace Engine
             RemoveComponent(OwnedID);
         }
 
-        auto& NameMap = ObjectIDByNameByType[static_cast<std::size_t>(Target->Type)]; //対象型の名前索引
-        NameMap.erase(Target->Name);
+        ObjectIDByName.erase(Target->Name);
         ObjectsByID[objectID.GetValue()].reset();
         --ObjectCount;
         return true;
@@ -435,7 +434,7 @@ namespace Engine
         return Duplicate;
     }
 
-    //概要：Objectの型別名前索引を保ったまま一意な名前へ変更する
+    //概要：Scene内名前索引を保ったまま一意な名前へ変更する
     //引数：objectID=変更対象Object ID、requestedName=新しい希望名
     //戻り値：名前を変更できた場合はtrue
     bool ObjectManager::RenameObject(
@@ -455,20 +454,16 @@ namespace Engine
             return true;
         }
 
-        auto& NameMap = ObjectIDByNameByType[
-            static_cast<std::size_t>(Target->Type)
-        ]; //対象型の名前索引
         const std::string PreviousName = Target->Name; //失敗時に復元する従来名
-        NameMap.erase(PreviousName);
+        ObjectIDByName.erase(PreviousName);
 
         const std::string ResolvedName = ResolveObjectName(
-            Target->Type,
             requestedName
-        ); //同じ型内で一意に解決した新しい名前
+        ); //Scene内で一意に解決した新しい名前
 
-        if (!NameMap.emplace(ResolvedName, objectID).second)
+        if (!ObjectIDByName.emplace(ResolvedName, objectID).second)
         {
-            NameMap.emplace(PreviousName, objectID);
+            ObjectIDByName.emplace(PreviousName, objectID);
             MessageLog::GetInstance().AddPermanentLog(
                 "[Critical] ObjectManager | Object rename index registration failed."
             );
@@ -548,6 +543,25 @@ namespace Engine
         return ObjectsByID[objectID.GetValue()].get();
     }
 
+    //Scene内で一意な解決済み名からObjectを平均O(1)で検索する
+    //引数: resolvedName 解決済み名
+    //戻り値: 見つかったObject、未登録時はnullptr
+    Object* ObjectManager::FindObject(const std::string& resolvedName)
+    {
+        return const_cast<Object*>(
+            static_cast<const ObjectManager&>(*this).FindObject(resolvedName)
+        );
+    }
+
+    //Scene内で一意な解決済み名から読み取り専用Objectを平均O(1)で検索する
+    //引数: resolvedName 解決済み名
+    //戻り値: 見つかったObject、未登録時はnullptr
+    const Object* ObjectManager::FindObject(const std::string& resolvedName) const
+    {
+        const auto Iterator = ObjectIDByName.find(resolvedName); //名前のhash検索結果
+        return Iterator == ObjectIDByName.end() ? nullptr : FindObject(Iterator->second);
+    }
+
     //型×解決済み名からObjectを平均O(1)で検索する
     //引数: objectType Object型、resolvedName 解決済み名
     //戻り値: 見つかったObject、未登録時はnullptr
@@ -574,9 +588,8 @@ namespace Engine
             return nullptr;
         }
 
-        const auto& NameMap = ObjectIDByNameByType[static_cast<std::size_t>(objectType)]; //対象型の名前索引
-        const auto Iterator = NameMap.find(resolvedName); //名前のhash検索結果
-        return Iterator == NameMap.end() ? nullptr : FindObject(Iterator->second);
+        const Object* Target = FindObject(resolvedName); //Scene内で一意な名前のObject
+        return Target != nullptr && Target->GetType() == objectType ? Target : nullptr;
     }
 
     //Component IDから走査せず登録Componentを取得する
@@ -752,7 +765,7 @@ namespace Engine
         {
             Object* TargetObject = ObjectsByID[Index].get(); //現在初期化を試みるObject
 
-            if (!TargetObject || !TargetObject->Active || RenderableObjectInitializedByID[Index])
+            if (!TargetObject || RenderableObjectInitializedByID[Index])
             {
                 continue;
             }
@@ -806,6 +819,17 @@ namespace Engine
         return Succeeded;
     }
 
+    //指定Renderable ObjectのGPU初期化が完了しているか確認する
+    //引数: objectID 確認対象Object
+    //戻り値: 登録済みRenderable Objectの初期化が完了している場合はtrue
+    bool ObjectManager::IsRenderableObjectInitialized(ObjectID objectID) const
+    {
+        const std::size_t Index = objectID.GetValue(); //状態配列へ使用するObject ID値
+        return Index > 0 && Index < ObjectsByID.size() && ObjectsByID[Index] != nullptr &&
+            dynamic_cast<const IRenderable*>(ObjectsByID[Index].get()) != nullptr &&
+            RenderableObjectInitializedByID[Index];
+    }
+
     //有効Renderable Objectと初期化済みComponentを更新する
     //引数: deltaTime 前回更新からの秒数
     void ObjectManager::UpdateComponents(float deltaTime)
@@ -814,7 +838,8 @@ namespace Engine
         {
             Object* TargetObject = ObjectsByID[Index].get(); //現在更新するObject
 
-            if (!TargetObject || !TargetObject->Active)
+            if (!TargetObject || !TargetObject->Active ||
+                !RenderableObjectInitializedByID[Index])
             {
                 continue;
             }
@@ -847,7 +872,8 @@ namespace Engine
         {
             Object* TargetObject = ObjectsByID[Index].get(); //現在描画するObject
 
-            if (!TargetObject || !TargetObject->Active)
+            if (!TargetObject || !TargetObject->Active ||
+                !RenderableObjectInitializedByID[Index])
             {
                 continue;
             }
@@ -1021,39 +1047,33 @@ namespace Engine
         return ComponentCount;
     }
 
-    //Object型と希望名から同型内で一意な名前を解決する
-    //引数: objectType Object型、requestedName 希望名
+    //希望名からScene内で一意なObject名を解決する
+    //引数: requestedName 希望名
     //戻り値: 空名を補正し必要なら_数値を加えた名前
-    std::string ObjectManager::ResolveObjectName(
-        ObjectType objectType,
-        const std::string& requestedName
-    )
+    std::string ObjectManager::ResolveObjectName(const std::string& requestedName)
     {
         const std::string BaseName = requestedName.empty() ? "Object" : requestedName; //接尾辞を除く基底名
-        const std::size_t TypeIndex = static_cast<std::size_t>(objectType); //Vector<Map>の型添字
-        auto& NameMap = ObjectIDByNameByType[TypeIndex]; //対象型の名前索引
-        auto& SuffixMap = ObjectSuffixByNameByType[TypeIndex]; //対象型の次回接尾辞索引
 
-        if (!NameMap.contains(BaseName))
+        if (!ObjectIDByName.contains(BaseName))
         {
-            SuffixMap.try_emplace(BaseName, 1);
+            ObjectSuffixByName.try_emplace(BaseName, 1);
             return BaseName;
         }
 
-        std::uint32_t& NextSuffix = SuffixMap[BaseName]; //再走査を避ける次回接尾辞
+        std::uint32_t& NextSuffix = ObjectSuffixByName[BaseName]; //再走査を避ける次回接尾辞
 
         if (NextSuffix == 0)
         {
             NextSuffix = 1;
         }
 
-        std::string Candidate; //同型内で一意になるまで更新する候補名
+        std::string Candidate; //Scene内で一意になるまで更新する候補名
 
         do
         {
             Candidate = BaseName + "_" + std::to_string(NextSuffix);
             ++NextSuffix;
-        } while (NameMap.contains(Candidate));
+        } while (ObjectIDByName.contains(Candidate));
 
         return Candidate;
     }

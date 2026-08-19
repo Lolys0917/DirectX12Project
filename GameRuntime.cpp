@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "EngineAPI.h"
+#include "EngineDiagnostics.h"
 #include "FrameRateController.h"
 #include "GameApp.h"
 #include "MessageLog.h"
@@ -263,6 +264,26 @@ namespace Engine
         }
 
         EngineAPI NativeAPI(Application); //Game Thread内だけでEngine状態を操作するFacade
+        const bool DiagnosticMode = IsEngineDiagnosticModeEnabled(); //明示的な実行時診断起動の場合true
+
+        if (DiagnosticMode)
+        {
+            const EngineDiagnosticResult DiagnosticResult = RunEngineDiagnostics(NativeAPI); //主要LifecycleとAPIの診断結果
+
+            if (!WriteEngineDiagnosticReport(DiagnosticResult))
+            {
+                MessageLog::GetInstance().AddPermanentLog(
+                    "[Critical] Diagnostics | Diagnostic report could not be written."
+                );
+            }
+
+            MessageLog::GetInstance().AddPermanentLog(
+                DiagnosticResult.Passed()
+                    ? "[Info] Diagnostics | All runtime checks passed."
+                    : "[Critical] Diagnostics | One or more runtime checks failed."
+            );
+        }
+
         FrameRateController FrameRate; //Game Thread専用固定更新管理器
         FrameRate.SetTargetFrameRate(RequestedFrameRate);
         std::uint64_t PublishedRevision = NativeAPI.GetRevision(); //最後に公開したEngine構造Revision
@@ -274,6 +295,13 @@ namespace Engine
             InitializationSucceeded = true;
         }
         WakeCondition.notify_all();
+
+        if (DiagnosticMode)
+        {
+            HWND RootWindow = GetAncestor(RenderWindow, GA_ROOT); //診断完了後に閉じるEditor親Window
+            PostMessageW(RootWindow != nullptr ? RootWindow : RenderWindow, WM_CLOSE, 0, 0);
+        }
+
         bool NeedsDraw = true; //Scene出力を更新する場合true
 
         while (true)
