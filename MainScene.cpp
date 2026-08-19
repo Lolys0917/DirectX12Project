@@ -20,6 +20,8 @@
 #include "Object.h"
 #include "ObjectManager.h"
 #include "OBJModel.h"
+#include "Box.h"
+
 
 namespace Engine
 {
@@ -38,6 +40,8 @@ namespace Engine
             GetObjectManager(); // MainScene専用ObjectManager
         Object* DemoObject =
             Objects.CreateObject<Object>("DemoModel"); // DemoModelを所有するObject
+        DemoObject1 =
+            Objects.CreateObject<Box>("DemoBox");
 
         if (DemoObject == nullptr)
         {
@@ -47,6 +51,10 @@ namespace Engine
             return false;
         }
 
+        DemoObject1->SetPosition(DirectX::XMFLOAT3(3.0f, 0.0f, 0.0f));
+        DemoObject1->SetScale(DirectX::XMFLOAT3(1.0f, 1.0f, 1.0f));
+        DemoObject1->SetColor(DirectX::XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f));
+
         DemoObject->SetPosition(DirectX::XMFLOAT3(0.0f, 0.0f, 0.0f));
         DemoObject->SetScale(DirectX::XMFLOAT3(0.1f, 0.1f, 0.1f));
         DemoObject->SetRotation(DirectX::XMFLOAT3(
@@ -55,7 +63,7 @@ namespace Engine
             0.0f
         ));
 
-        OBJModel* DemoModel = Objects.AddComponent<OBJModel>(
+        DemoModel = Objects.AddComponent<OBJModel>(
             DemoObject->GetID(),
             "DemoModel"
         ); // Cat OBJを描画するModel Component

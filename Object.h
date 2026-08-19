@@ -138,7 +138,7 @@ namespace Engine
         //destination : 未登録の複製先
         void CopyDefinitionTo(Object& destination) const;
 
-    private:
+    protected:
         friend class ObjectManager;
 
         //未登録コンポーネントの所有権を受け取る

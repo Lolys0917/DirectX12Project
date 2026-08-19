@@ -230,8 +230,6 @@
     <ClCompile Include="RotationScript.cpp" />
     <ClCompile Include="Scene.cpp" />
     <ClCompile Include="SceneManager.cpp" />
-    <ClCompile Include="Script.cpp" />
-    <ClCompile Include="ScriptSystem.cpp" />
     <ClCompile Include="Sphere.cpp" />
     <ClCompile Include="Texture2D.cpp" />
     <ClCompile Include="Transform.cpp" />

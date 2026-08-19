@@ -23,10 +23,20 @@
 
 #include "Component.h"
 #include "EntityTypes.h"
+//オブジェクトインクルード
 #include "Object.h"
+#include "Sphere.h"
+
 
 namespace Engine
 {
+    struct ObjectDataPool
+    {
+        std::vector<Box> BoxObject;
+        std::vector<Sphere> SphereObject;
+        std::vector<OBJModel> ObjModel;
+    };
+
     class DirectX12;
     struct RenderContext;
 
