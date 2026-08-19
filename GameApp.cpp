@@ -7,6 +7,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v2.30  Native Main層向けDirectX12取得APIを追加
 //||  2026_07_13  v2.20  編集: DemoModel生成をMainSceneへ移しManagerへ初期化を集約
 //||  2026_07_13  v2.10  編集: 初期化、描画、Resizeの異常終了をMessageLogへ記録
 //||  2026_07_13  v2.00  編集: 直接Object所有をSceneManager所有へ変更
@@ -211,5 +212,21 @@ namespace Engine
     const SceneManager& GameApp::GetSceneManager() const
     {
         return Scenes;
+    }
+
+    //概要：Applicationが所有する描画APIをネイティブMain層へ公開する
+    //引数：なし
+    //戻り値：Component初期化と描画に使用するDirectX12への参照
+    DirectX12& GameApp::GetDirectX12()
+    {
+        return Graphics.GetDirectX12();
+    }
+
+    //概要：Applicationが所有する描画APIを読み取り専用で公開する
+    //引数：なし
+    //戻り値：読み取り専用DirectX12への参照
+    const DirectX12& GameApp::GetDirectX12() const
+    {
+        return Graphics.GetDirectX12();
     }
 }

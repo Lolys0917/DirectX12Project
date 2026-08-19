@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v2.30  Editor用Object複製と名前索引更新処理を追加
 //||  2026_07_13  v2.20  異常な登録、索引不整合及び初期化失敗をMessageLogへ記録
 //||  2026_07_13  v2.10  IRenderable Objectの描画Lifecycleを統合
 //||  2026_07_13  v2.00  強いID、Vector<Map>索引、所有者別Component索引を実装
@@ -13,6 +14,8 @@
 
 #include "ObjectManager.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <limits>
 
@@ -201,6 +204,19 @@ namespace Engine
             return false;
         }
 
+        const std::vector<ObjectID> ChildIDs = Target->Children; //再帰削除する直接Child一覧
+
+        for (ObjectID ChildID : ChildIDs)
+        {
+            RemoveObject(ChildID);
+        }
+
+        if (Target->Parent != nullptr)
+        {
+            RemoveChildReference(*Target->Parent, objectID);
+            Target->Parent = nullptr;
+        }
+
         if (IRenderable* Renderable = dynamic_cast<IRenderable*>(Target)) //削除前にGPU Resourceを終了する
         {
             Renderable->Finalize();
@@ -220,6 +236,98 @@ namespace Engine
         ObjectsByID[objectID.GetValue()].reset();
         --ObjectCount;
         return true;
+    }
+
+    //概要：循環を防ぎながらObjectの親を変更する
+    //引数：childID=変更するObject、parentID=新しい親又は無効ID、keepWorldTransform=見た目のWorld姿勢を維持する場合true
+    //戻り値：親子関係を変更できた場合はtrue
+    bool ObjectManager::SetParent(
+        ObjectID childID,
+        ObjectID parentID,
+        bool keepWorldTransform
+    )
+    {
+        Object* Child = FindObject(childID); //親を変更するObject
+        Object* NewParent = parentID.IsValid() ? FindObject(parentID) : nullptr; //新しい親Object
+
+        if (Child == nullptr || (parentID.IsValid() && NewParent == nullptr) ||
+            Child == NewParent ||
+            (NewParent != nullptr && IsDescendantOf(NewParent->GetID(), childID)))
+        {
+            return false;
+        }
+
+        if (Child->Parent == NewParent)
+        {
+            return true;
+        }
+
+        Transform NewLocalTransform = Child->ObjectTransform; //親変更後に設定するLocal姿勢
+
+        if (keepWorldTransform)
+        {
+            const DirectX::XMMATRIX WorldMatrix = Child->GetWorldMatrix(); //変更前のWorld姿勢
+            DirectX::XMMATRIX LocalMatrix = WorldMatrix; //新しい親から見たLocal姿勢
+
+            if (NewParent != nullptr)
+            {
+                DirectX::XMVECTOR Determinant; //逆行列計算で使用する行列式
+                const DirectX::XMMATRIX ParentInverse = DirectX::XMMatrixInverse(
+                    &Determinant,
+                    NewParent->GetWorldMatrix()
+                ); //新しい親World行列の逆行列
+
+                if (std::fabs(DirectX::XMVectorGetX(Determinant)) <= 0.000001f)
+                {
+                    return false;
+                }
+
+                LocalMatrix = WorldMatrix * ParentInverse;
+            }
+
+            if (!NewLocalTransform.SetLocalMatrix(LocalMatrix))
+            {
+                return false;
+            }
+        }
+
+        if (Child->Parent != nullptr)
+        {
+            RemoveChildReference(*Child->Parent, childID);
+        }
+
+        Child->Parent = NewParent;
+        Child->ObjectTransform = NewLocalTransform;
+
+        if (NewParent != nullptr)
+        {
+            NewParent->Children.emplace_back(childID);
+        }
+
+        return true;
+    }
+
+    //概要：指定Objectが候補Ancestorの子孫か確認する
+    //引数：objectID=確認するObject、possibleAncestorID=祖先候補Object
+    //戻り値：親をたどって候補へ到達した場合はtrue
+    bool ObjectManager::IsDescendantOf(
+        ObjectID objectID,
+        ObjectID possibleAncestorID
+    ) const
+    {
+        const Object* Current = FindObject(objectID); //親を順に確認するObject
+
+        while (Current != nullptr && Current->Parent != nullptr)
+        {
+            Current = Current->Parent;
+
+            if (Current->GetID() == possibleAncestorID)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     //Componentを削除してIDとObject内slotをtombstone化する
@@ -261,6 +369,156 @@ namespace Engine
         Owner->DetachComponent(Location.OwnerSlot);
         Location = {};
         --ComponentCount;
+        return true;
+    }
+
+    //概要：指定Objectとその全Component定義を新しい安定IDで複製する
+    //引数：sourceID=複製元Object ID、requestedName=複製先Objectの希望名
+    //戻り値：登録済みの複製Object、失敗した場合はnullptr
+    Object* ObjectManager::CloneObject(
+        ObjectID sourceID,
+        const std::string& requestedName
+    )
+    {
+        const Object* Source = FindObject(sourceID); //複製元Object
+
+        if (Source == nullptr)
+        {
+            return nullptr;
+        }
+
+        std::unique_ptr<Object> Definition = Source->Clone(); //IDを持たないObject定義
+
+        if (!Definition)
+        {
+            AddObjectManagerFailureLog(
+                "Object clone definition was unavailable for Object",
+                sourceID.GetValue(),
+                false
+            );
+            return nullptr;
+        }
+
+        Object* Duplicate = AddObject(
+            std::move(Definition),
+            requestedName.empty() ? Source->GetName() : requestedName
+        ); //新しいIDを割り当てた複製Object
+
+        if (Duplicate == nullptr)
+        {
+            return nullptr;
+        }
+
+        for (ComponentID SourceComponentID : Source->GetComponentIDs())
+        {
+            const Component* SourceComponent = FindComponent(SourceComponentID); //複製するComponent
+            std::unique_ptr<Component> ComponentDefinition = SourceComponent == nullptr
+                ? nullptr
+                : SourceComponent->Clone(); //所有者とIDを持たないComponent定義
+
+            if (SourceComponent == nullptr || !ComponentDefinition ||
+                AddComponent(
+                    Duplicate->GetID(),
+                    std::move(ComponentDefinition),
+                    SourceComponent->GetName()) == nullptr)
+            {
+                AddObjectManagerFailureLog(
+                    "Component clone failed while cloning Object",
+                    sourceID.GetValue(),
+                    false
+                );
+                RemoveObject(Duplicate->GetID());
+                return nullptr;
+            }
+        }
+
+        return Duplicate;
+    }
+
+    //概要：Objectの型別名前索引を保ったまま一意な名前へ変更する
+    //引数：objectID=変更対象Object ID、requestedName=新しい希望名
+    //戻り値：名前を変更できた場合はtrue
+    bool ObjectManager::RenameObject(
+        ObjectID objectID,
+        const std::string& requestedName
+    )
+    {
+        Object* Target = FindObject(objectID); //名前を変更するObject
+
+        if (Target == nullptr || requestedName.empty())
+        {
+            return false;
+        }
+
+        if (Target->Name == requestedName)
+        {
+            return true;
+        }
+
+        auto& NameMap = ObjectIDByNameByType[
+            static_cast<std::size_t>(Target->Type)
+        ]; //対象型の名前索引
+        const std::string PreviousName = Target->Name; //失敗時に復元する従来名
+        NameMap.erase(PreviousName);
+
+        const std::string ResolvedName = ResolveObjectName(
+            Target->Type,
+            requestedName
+        ); //同じ型内で一意に解決した新しい名前
+
+        if (!NameMap.emplace(ResolvedName, objectID).second)
+        {
+            NameMap.emplace(PreviousName, objectID);
+            MessageLog::GetInstance().AddPermanentLog(
+                "[Critical] ObjectManager | Object rename index registration failed."
+            );
+            return false;
+        }
+
+        Target->Name = ResolvedName;
+        return true;
+    }
+
+    //概要：Componentの所有者別名前索引を保ったまま一意な名前へ変更する
+    //引数：componentID=変更対象Component ID、requestedName=新しい希望名
+    //戻り値：名前を変更できた場合はtrue
+    bool ObjectManager::RenameComponent(
+        ComponentID componentID,
+        const std::string& requestedName
+    )
+    {
+        Component* Target = FindComponent(componentID); //名前を変更するComponent
+
+        if (Target == nullptr || Target->Owner == nullptr || requestedName.empty())
+        {
+            return false;
+        }
+
+        if (Target->Name == requestedName)
+        {
+            return true;
+        }
+
+        Object& Owner = *Target->Owner; //名前索引を所有するObject
+        const ComponentType Type = Target->Type; //名前を解決するComponent型
+        const std::string PreviousName = Target->Name; //失敗時に復元する従来名
+        Owner.UnregisterComponentName(Type, PreviousName);
+
+        const std::string ResolvedName = Owner.ResolveComponentName(
+            Type,
+            requestedName
+        ); //所有者かつ型内で一意な新しい名前
+
+        if (!Owner.RegisterComponentName(Type, ResolvedName, componentID))
+        {
+            Owner.RegisterComponentName(Type, PreviousName, componentID);
+            MessageLog::GetInstance().AddPermanentLog(
+                "[Critical] ObjectManager | Component rename index registration failed."
+            );
+            return false;
+        }
+
+        Target->Name = ResolvedName;
         return true;
     }
 
@@ -686,6 +944,34 @@ namespace Engine
             ObjectIDRemap.emplace(SourceID, Destination->GetID());
         }
 
+        for (ObjectID SourceID : GetObjectIDs())
+        {
+            const Object* Source = FindObject(SourceID); //親子関係を複製する元Object
+
+            if (Source == nullptr || !Source->GetParentID().IsValid())
+            {
+                continue;
+            }
+
+            const auto ChildIterator = ObjectIDRemap.find(SourceID); //複製先Child ID
+            const auto ParentIterator = ObjectIDRemap.find(Source->GetParentID()); //複製先Parent ID
+
+            if (ChildIterator == ObjectIDRemap.end() || ParentIterator == ObjectIDRemap.end() ||
+                !Duplicate->SetParent(
+                    ChildIterator->second,
+                    ParentIterator->second,
+                    false
+                ))
+            {
+                AddObjectManagerFailureLog(
+                    "Cloned Object hierarchy registration failed for source Object",
+                    SourceID.GetValue(),
+                    false
+                );
+                return nullptr;
+            }
+        }
+
         for (ComponentID SourceID : GetComponentIDs()) //複製元の有効Component ID
         {
             const Component* Source = FindComponent(SourceID); //複製元Component
@@ -788,5 +1074,16 @@ namespace Engine
     {
         return static_cast<std::size_t>(componentType) <
             static_cast<std::size_t>(ComponentType::Count);
+    }
+
+    //概要：親Objectの直接Child一覧から指定IDを取り除く
+    //引数：parent=参照を所有する親Object、childID=取り除くChild Object ID
+    //戻り値：なし
+    void ObjectManager::RemoveChildReference(Object& parent, ObjectID childID)
+    {
+        parent.Children.erase(
+            std::remove(parent.Children.begin(), parent.Children.end(), childID),
+            parent.Children.end()
+        );
     }
 }

@@ -65,11 +65,17 @@ namespace Engine
         return Graphics.Resize(width, height);
     }
 
+    //概要：所有するDirectX 12描画基盤を取得する
+    //引数：なし
+    //戻り値：編集可能なDirectX12への参照
     DirectX12& GraphicBase::GetDirectX12()
     {
         return Graphics;
     }
 
+    //概要：所有する描画基盤を読み取り専用で取得する
+    //引数：なし
+    //戻り値：読み取り専用DirectX12への参照
     const DirectX12& GraphicBase::GetDirectX12() const
     {
         return Graphics;

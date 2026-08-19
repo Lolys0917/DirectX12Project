@@ -7,6 +7,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v1.30  Editor Snapshot用Scene ID列挙を追加
 //||  2026_07_13  v1.20  編集: 派生Scene初期化とMainScene状態管理を追加
 //||  2026_07_13  v1.10  編集: Scene作成、複製、Active索引及びResize失敗をログへ記録
 //||  2026_07_13  v1.00  新規作成: 複数Active SceneとViewScene管理を追加
@@ -490,8 +491,28 @@ namespace Engine
         return ViewScene == nullptr ? nullptr : ViewScene->GetRenderTexture();
     }
 
-    // 現在所有するScene数を取得する
-    // 戻り値: Tombstoneを除いたScene数
+    //概要：有効Scene IDを登録順の安全なSnapshotとして取得する
+    //引数：なし
+    //戻り値：Tombstoneを除くScene ID一覧
+    std::vector<SceneID> SceneManager::GetSceneIDs() const
+    {
+        std::vector<SceneID> Result; //返却するScene ID一覧
+        Result.reserve(SceneCount);
+
+        for (std::size_t Index = 1; Index < ScenesByID.size(); ++Index)
+        {
+            if (ScenesByID[Index] != nullptr)
+            {
+                Result.emplace_back(static_cast<std::uint32_t>(Index));
+            }
+        }
+
+        return Result;
+    }
+
+    //概要：現在所有する有効Scene数を取得する
+    //引数：なし
+    //戻り値：Tombstoneを除くScene数
     std::size_t SceneManager::GetSceneCount() const
     {
         return SceneCount;

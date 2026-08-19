@@ -53,9 +53,9 @@ namespace Engine
         , Type(objectType)
         , Name()
         , Active(true)
-        , Position(0.0f, 0.0f, 0.0f)
-        , Rotation(0.0f, 0.0f, 0.0f)
-        , Scale(1.0f, 1.0f, 1.0f)
+        , ObjectTransform()
+        , Parent(nullptr)
+        , Children()
         , Components()
         , ComponentIDByNameByType(static_cast<std::size_t>(ComponentType::Count))
         , ComponentSuffixByNameByType(static_cast<std::size_t>(ComponentType::Count))
@@ -82,34 +82,97 @@ namespace Engine
     void Object::CopyDefinitionTo(Object& destination) const
     {
         destination.Active = Active;
-        destination.Position = Position;
-        destination.Rotation = Rotation;
-        destination.Scale = Scale;
+        destination.ObjectTransform = ObjectTransform;
+    }
+
+    //概要：ObjectのLocal座標を変更する
+    //引数：position=設定するXYZ座標
+    //戻り値：なし
+    void Object::SetPosition(const DirectX::XMFLOAT3& position)
+    {
+        ObjectTransform.SetLocalPosition(position);
+    }
+
+    //概要：ObjectのLocal回転角を変更する
+    //引数：rotation=ラジアン単位のXYZ回転角
+    //戻り値：なし
+    void Object::SetRotation(const DirectX::XMFLOAT3& rotation)
+    {
+        ObjectTransform.SetLocalRotation(rotation);
+    }
+
+    //概要：ObjectのLocal拡縮率を変更する
+    //引数：scale=設定するXYZ拡縮率
+    //戻り値：なし
+    void Object::SetScale(const DirectX::XMFLOAT3& scale)
+    {
+        ObjectTransform.SetLocalScale(scale);
+    }
+
+    //概要：ObjectのLocal座標を取得する
+    //引数：なし
+    //戻り値：XYZ Local座標
+    const DirectX::XMFLOAT3& Object::GetPosition() const
+    {
+        return ObjectTransform.GetLocalPosition();
+    }
+
+    //概要：ObjectのLocal回転角を取得する
+    //引数：なし
+    //戻り値：ラジアン単位のXYZ回転角
+    const DirectX::XMFLOAT3& Object::GetRotation() const
+    {
+        return ObjectTransform.GetLocalRotation();
+    }
+
+    //概要：ObjectのLocal拡縮率を取得する
+    //引数：なし
+    //戻り値：XYZ Local拡縮率
+    const DirectX::XMFLOAT3& Object::GetScale() const
+    {
+        return ObjectTransform.GetLocalScale();
+    }
+
+    //概要：削除不能な必須Transformを取得する
+    //引数：なし
+    //戻り値：Objectが所有するTransformへの参照
+    Transform& Object::GetTransform()
+    {
+        return ObjectTransform;
+    }
+
+    //概要：削除不能な必須Transformを読み取り専用で取得する
+    //引数：なし
+    //戻り値：Objectが所有するTransformへの読み取り専用参照
+    const Transform& Object::GetTransform() const
+    {
+        return ObjectTransform;
+    }
+
+    //概要：親ObjectのIDを取得する
+    //引数：なし
+    //戻り値：親Object ID、Rootの場合は無効ID
+    ObjectID Object::GetParentID() const
+    {
+        return Parent == nullptr ? ObjectID() : Parent->GetID();
+    }
+
+    //概要：直接Child ObjectのID一覧を取得する
+    //引数：なし
+    //戻り値：登録順のChild Object ID一覧
+    const std::vector<ObjectID>& Object::GetChildIDs() const
+    {
+        return Children;
     }
 
     //オブジェクトのワールド行列を取得する
     //戻り値 : 拡縮、回転、平行移動を合成したワールド行列
     DirectX::XMMATRIX Object::GetWorldMatrix() const
     {
-        DirectX::XMMATRIX ScaleMatrix = DirectX::XMMatrixScaling(
-            Scale.x,
-            Scale.y,
-            Scale.z
-        ); //拡縮行列
-
-        DirectX::XMMATRIX RotationMatrix = DirectX::XMMatrixRotationRollPitchYaw(
-            Rotation.x,
-            Rotation.y,
-            Rotation.z
-        ); //回転行列
-
-        DirectX::XMMATRIX TranslationMatrix = DirectX::XMMatrixTranslation(
-            Position.x,
-            Position.y,
-            Position.z
-        ); //平行移動行列
-
-        return ScaleMatrix * RotationMatrix * TranslationMatrix;
+        const DirectX::XMMATRIX LocalMatrix = ObjectTransform.GetLocalMatrix(); //自身のLocal姿勢
+        return Parent == nullptr
+            ? LocalMatrix
+            : LocalMatrix * Parent->GetWorldMatrix();
     }
 
     //現在所有している有効なコンポーネント数を取得する

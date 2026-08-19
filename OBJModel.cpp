@@ -1072,6 +1072,9 @@ float4 PSMain(VSOutput input) : SV_TARGET
         return true;
     }
 
+    //概要：OBJ Model全体へ乗算するRGBA色を変更する
+    //引数：color=描画時に使用するRGBA色
+    //戻り値：なし
     void OBJModel::SetColor(
         const DirectX::XMFLOAT4& color
     )
@@ -1086,6 +1089,9 @@ float4 PSMain(VSOutput input) : SV_TARGET
         (void)deltaTime;
     }
 
+    //概要：所有ObjectからOBJ ModelのWorld行列を取得する
+    //引数：なし
+    //戻り値：所有ObjectのWorld行列、未所有時は単位行列
     DirectX::XMMATRIX OBJModel::GetWorldMatrix() const
     {
         const Object* Owner = GetOwner(); //Model Componentを所有するObject

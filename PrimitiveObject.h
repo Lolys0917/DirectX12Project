@@ -39,7 +39,14 @@ namespace Engine
         PrimitiveObject& operator=(const PrimitiveObject&) = delete;
 
         void SetColor(const DirectX::XMFLOAT4& color);
+        //概要：頂点生成へ使用するRGBA色を取得する
+        //引数：なし
+        //戻り値：現在のRGBA色
         const DirectX::XMFLOAT4& GetColor() const { return Color; }
+
+        //概要：Primitiveが所有する頂点Meshを取得する
+        //引数：なし
+        //戻り値：読み取り専用VertexMesh
         const VertexMesh& GetMesh() const { return Mesh; }
 
         //CPUメッシュからGPU資源を作成する

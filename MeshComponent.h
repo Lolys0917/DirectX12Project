@@ -38,7 +38,14 @@ namespace Engine
             const std::vector<std::uint32_t>& indices
         );
 
+        //概要：Componentが所有する頂点Meshを取得する
+        //引数：なし
+        //戻り値：編集可能なVertexMesh
         VertexMesh& GetMesh() { return Mesh; }
+
+        //概要：Componentが所有する頂点Meshを読み取り専用で取得する
+        //引数：なし
+        //戻り値：読み取り専用VertexMesh
         const VertexMesh& GetMesh() const { return Mesh; }
 
         //GPUメッシュ資源を作成する

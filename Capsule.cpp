@@ -32,6 +32,9 @@ namespace Engine
     //カプセルを破棄する
     Capsule::~Capsule() = default;
 
+    //概要：Capsuleの半径と全高を安全な値へ補正してMeshを再構築する
+    //引数：radius=Capsule半径、height=両端を含む全高
+    //戻り値：なし
     void Capsule::SetSize(float radius, float height)
     {
         constexpr float MinimumRadius = 0.0001f; //ゼロ形状を防ぐ最小半径
@@ -40,6 +43,9 @@ namespace Engine
         BuildMesh();
     }
 
+    //概要：Capsuleの円周と片側半球分割数を変更してMeshを再構築する
+    //引数：slice=円周分割数、hemisphereStack=片側半球分割数
+    //戻り値：なし
     void Capsule::SetDivision(std::uint32_t slice, std::uint32_t hemisphereStack)
     {
         Slice = (std::max<std::uint32_t>)(slice, 3);

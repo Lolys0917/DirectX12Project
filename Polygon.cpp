@@ -35,6 +35,9 @@ namespace Engine
         Finalize();
     }
 
+    //概要：Polygonの幅と高さを安全な正値へ補正してMeshを再構築する
+    //引数：width=横幅、height=縦幅
+    //戻り値：なし
     void Polygon::SetSize(float width, float height)
     {
         Size.x = (std::max)(0.0f, width);
@@ -42,18 +45,27 @@ namespace Engine
         BuildMesh();
     }
 
+    //概要：PolygonのRGBA頂点色を変更してMeshを再構築する
+    //引数：color=設定するRGBA色
+    //戻り値：なし
     void Polygon::SetColor(const DirectX::XMFLOAT4& color)
     {
         Color = color;
         BuildMesh();
     }
 
+    //概要：Polygonが使用するUV矩形を変更してMeshを再構築する
+    //引数：u0=左U、v0=上V、u1=右U、v1=下V
+    //戻り値：なし
     void Polygon::SetUV(float u0, float v0, float u1, float v1)
     {
         UVRectangle = DirectX::XMFLOAT4(u0, v0, u1, v1);
         BuildMesh();
     }
 
+    //概要：次回初期化で読み込むTexture Pathを変更する
+    //引数：path=画像ファイルPath
+    //戻り値：なし
     void Polygon::SetTexturePath(const std::wstring& path)
     {
         TexturePath = path;

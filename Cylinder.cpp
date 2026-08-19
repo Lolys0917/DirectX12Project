@@ -31,6 +31,9 @@ namespace Engine
     //円柱を破棄する
     Cylinder::~Cylinder() = default;
 
+    //概要：円柱の半径と高さを安全な正値へ補正してMeshを再構築する
+    //引数：radius=円柱半径、height=Y軸高さ
+    //戻り値：なし
     void Cylinder::SetSize(float radius, float height)
     {
         constexpr float MinimumSize = 0.0001f; //ゼロ形状を防ぐ最小寸法
@@ -39,6 +42,9 @@ namespace Engine
         BuildMesh();
     }
 
+    //概要：円柱の円周分割数を変更してMeshを再構築する
+    //引数：slice=円周分割数
+    //戻り値：なし
     void Cylinder::SetDivision(std::uint32_t slice)
     {
         Slice = (std::max<std::uint32_t>)(slice, 3);

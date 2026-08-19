@@ -22,6 +22,9 @@ namespace Engine
     {
     public:
         //派生描画Objectを基底Pointerから安全に破棄する
+        //概要：描画契約を持つObject又はComponentを破棄する
+        //引数：なし
+        //戻り値：なし
         virtual ~IRenderable() = default;
 
         //CPU MeshからGPU Resourceを作成する

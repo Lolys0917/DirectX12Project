@@ -476,11 +476,17 @@ namespace Engine
         return true;
     }
 
+    //概要：Texture参照用Shader Resource View Heapを取得する
+    //引数：なし
+    //戻り値：SRV Descriptor Heap、未初期化時はnullptr
     ID3D12DescriptorHeap* Texture2D::GetSRVHeap() const
     {
         return SRVHeap.Get();
     }
 
+    //概要：Texture SRVのGPU Descriptor Handleを取得する
+    //引数：なし
+    //戻り値：SRV Heap先頭Handle、未初期化時は空Handle
     D3D12_GPU_DESCRIPTOR_HANDLE Texture2D::GetSRVGPUHandle() const
     {
         return SRVHeap->GetGPUDescriptorHandleForHeapStart();

@@ -7,6 +7,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v2.30  Native Main層向けDirectX12取得APIを追加
 //||  2026_07_13  v2.20  編集: MainScene生成と状態設定をSceneManagerへ集約
 //||  2026_07_13  v2.00  編集: 直接Object所有をSceneManager所有へ変更
 //||                         ViewScene RenderTexture表示とResizeを追加
@@ -81,6 +82,11 @@ namespace Engine
         // 戻り値: SceneManagerへの参照
         SceneManager& GetSceneManager();
         const SceneManager& GetSceneManager() const;
+
+        // Applicationが所有するDirectX 12描画基盤を取得する
+        // 戻り値: Component初期化と描画に使用するDirectX12への参照
+        DirectX12& GetDirectX12();
+        const DirectX12& GetDirectX12() const;
 
     private:
         GraphicBase Graphics; // DirectX 12描画基盤の所有者

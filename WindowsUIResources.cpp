@@ -219,16 +219,25 @@ namespace Engine
         }
     }
 
+    //概要：Windows標準Controlへ適用するInterface Fontを取得する
+    //引数：なし
+    //戻り値：作成済みFont Handle、未初期化時はnullptr
     HFONT WindowsUIResources::GetInterfaceFont() const
     {
         return InterfaceFont;
     }
 
+    //概要：Preview Controlへ表示するBitmapを取得する
+    //引数：なし
+    //戻り値：作成済みBitmap Handle、未読込時はnullptr
     HBITMAP WindowsUIResources::GetDemoBitmap() const
     {
         return DemoBitmap;
     }
 
+    //概要：実際に選択されたInterface Font名を取得する
+    //引数：なし
+    //戻り値：Primary、Secondary又はSystem Font名
     const std::wstring& WindowsUIResources::GetActiveFontFace() const
     {
         return ActiveFontFace;
@@ -578,6 +587,9 @@ namespace Engine
         return filePath;
     }
 
+    //概要：存在確認済みPreview画像Pathを現在設定へ反映する
+    //引数：texturePath=設定する画像ファイルPath
+    //戻り値：Fileが存在して設定できた場合はtrue
     bool WindowsUIResources::SetTexturePath(const std::wstring& texturePath)
     {
         if (texturePath.empty())

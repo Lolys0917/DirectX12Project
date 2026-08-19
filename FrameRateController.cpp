@@ -68,6 +68,9 @@ namespace Engine
         return Playing;
     }
 
+    //概要：固定更新へ使用する目標Frame Rateを取得する
+    //引数：なし
+    //戻り値：1から240の目標FPS
     uint32_t FrameRateController::GetTargetFrameRate() const
     {
         return TargetFrameRate;

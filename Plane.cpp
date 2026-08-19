@@ -29,6 +29,9 @@ namespace Engine
     //平面を破棄する
     Plane::~Plane() = default;
 
+    //概要：平面寸法を安全な正値へ補正してMeshを再構築する
+    //引数：width=X軸幅、depth=Z軸奥行き
+    //戻り値：なし
     void Plane::SetSize(float width, float depth)
     {
         constexpr float MinimumSize = 0.0001f; //ゼロ面を防ぐ最小寸法

@@ -1,6 +1,6 @@
 # DirectX 12 エンジン基盤仕様
 
-更新日: 2026-07-13
+更新日: 2026-08-17
 
 ## 1. 設計方針
 
@@ -11,6 +11,8 @@
 - `Box`、`Sphere`、`Plane`、`Cylinder`、`HalfSphere`、`Capsule`: `PrimitiveObject` を継承する。
 - `Camera`、`Grid`、`Polygon`、`Model`、`Collider`: `Component` を継承する。
 - `MainScene`: `Scene` を継承し、起動時に必要なゲーム固有ObjectとComponentを定義する。
+- `EngineAPI`: C++ネイティブのMainプログラムと外部Toolが描画、Scene、Object、Scriptの全公開APIへ到達するFacadeとする。
+- `Script`: ObjectへComponentとして差し込み、毎フレーム実行するSubプログラム基底とする。
 - Component の寿命は所有 Object の寿命を超えない。
 - Object と Component の登録、ID 付与、検索、削除は Scene ごとの `ObjectManager` だけが行う。
 
@@ -62,6 +64,8 @@ Component は `OwnerObjectID × ComponentType × ResolvedName = ComponentID` で
 5. Active Scene の全 Camera ごとに描画 Component を `Draw` する。
 6. 削除時は Component の索引を先に無効化してから Object を tombstone にする。
 7. Scene 破棄時は GPU 使用完了後に Component、Object、ObjectManager の順で破棄する。
+
+Script Componentは `OnAttach`、`OnStart`、`OnUpdate`、`OnStop`、`OnDetach` の順序を保証する。Object又はScriptが非Activeの場合は `OnUpdate` を呼ばない。実行中に追加したScriptは `Scene::InitializePendingComponents` により次の更新前に初期化する。
 
 Scene のデフォルトコピーは行わない。複製 API は Object と Component を新しい ObjectManager へ複製し、GPU リソースを複製先の描画環境で再初期化する。
 
@@ -122,7 +126,12 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 
 - 左: DXGI swap chain の対象となる子 viewport。`ViewScene` の RenderTexture を表示する。
 - 中央: ドラッグ可能な splitter。左右の最小幅を守って配置を変更する。
-- 右: `UIDemo.png`、Start、Stop、Tick、FPS Edit、FPS Trackbar、ログ一覧、一括消去ボタン。
+- 右: Engine、再生、ログ、メイン、スクリプトのTabを持つ操作パネル。
+- Engine Tab: Scene→Object→Component／ScriptのTree、Object追加、Script差込、DLL読込ボタン。
+- 再生Tab: `UIDemo.png`、Start、Stop、Tick、FPS Edit、FPS Trackbar。
+- ログTab: ログ一覧、一括消去ボタン。
+- メインTab: `Programs/` のC++を編集し、各フレームでScene／Object／Sub Scriptより先に実行する全体制御DLLを生成する。
+- スクリプトTab: `ScriptPrograms/` のC++を編集し、Objectへ差し込むUnityのScript相当のDLLを生成する。
 - 右操作領域は、上段を Start / Stop / Tick と状態表示、中央を UIDemo と FPS 設定、下段をメッセージログとして配置する。
 - 右パネルの範囲管理用Windowは描画せず、機能コントロールを親Editor Window上の前面へ明示的に固定して背景に隠れないようにする。
 - 初期分割比は左 68% / 右 32%、左描画領域の最小幅は 320 論理 px、右操作パネルの最小幅は 380 論理 px とする。
@@ -135,6 +144,10 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 - Stop: Update を停止し、最後の描画結果を保持する。
 - Tick: Stop 中に `1 / TargetFPS` 秒だけ 1 回 Update する。
 - Edit と Trackbar の値は常に同期し、範囲外値はクランプする。
+- Tree空白又はSceneの右クリックはObject追加、DLL読込、更新を提供する。
+- Objectの右クリックはScript差込、複製、名前変更、有効切替、削除を提供する。
+- Component又はScriptの右クリックは名前変更、有効切替、削除を提供する。
+- Primary Camera Object及びPrimary Camera Componentの削除は描画出力維持のため拒否する。
 - splitter や親 Window のサイズ変更時は、GPU 完了を待って swap chain とActive/Inactiveを含む全SceneのCamera RenderTextureを安全に再生成する。Resource作成失敗時はCameraの論理解像度を変更しない。
 
 ## 8. メッセージログ
@@ -157,12 +170,28 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 - Debug/Release と CRT の組み合わせを一致させる。
 - ソースは UTF-8 としてコンパイルする。
 - `d3dx12.h` は外部提供ファイルのためプロジェクト固有の命名・コメント修正対象外とする。
+- `SampleRotationScript.dll` は外部Script Moduleの動作例としてApplicationと同じ構成、Platformの出力先へ生成する。
 
 ## 10. コーディング規則
 
 - クラス、関数、型、ローカル変数、メンバー変数は UpperCamelCase。
 - 関数引数だけ lowerCamelCase。
-- 関数宣言の直上に機能、引数、戻り値の説明を書く。短い Set/Get は省略できる。
+- コメントメモは全ての関数定義の直上へ必ず書き、短いSet/GetやConstructorも省略しない。公開HeaderのAPI説明は別途併記できる。
+- 関数定義コメントは `概要：...`、`引数：引数名=意味、...`、`戻り値：...` の順とし、引数又は戻り値がない場合は `なし` と書く。
 - 変数宣言の行末に意味を書く。
 - 全 `.h` / `.cpp` の先頭に概要と更新内容を書く。
 - 追加、削除、編集を行った理由と内容を更新履歴へ記載する。
+
+## 11. Main／Subプログラム境界
+
+Mainプログラムは `Engine.h` と `EngineAPI` を入口とするC++ネイティブコードであり、`GameApp`、`DirectX12`、`SceneManager`、各Sceneの `ObjectManager`、Script Registry及びDLL Module Managerへ到達できる。ゲーム固有の根幹処理は `MainScene` のような派生Sceneへ直書きできる。毎フレームの順序は `Main Program → Active Scene → Object／Component／Sub Script` とする。
+
+Subプログラムは `Script` 派生Componentであり、EditorのEngine TabからObjectへ差し込む。Native ScriptとDLL Scriptは同じComponent ID、Active状態、初期化、複製、削除経路を使う。
+
+## 12. DLL Script ABI
+
+各DLLは同じ文字列 `EngineGetScriptModule` をExportできる。HostはDLLごとの `HMODULE` を `LoadLibraryW` で取得し、各Handleを引数として `GetProcAddress` を呼ぶため、Export名が同じでも関数PointerはModule別に区別される。
+
+取得した関数PointerはModuleを解放すると無効になるため、`ScriptModuleManager` はModuleごとのHandle、関数表、Registry Keyを保持する。既存Script Componentは共有所有権でModule寿命を延長し、最後の利用者が破棄されるまで `FreeLibrary` しない。
+
+DLL境界ではC++ Classや標準Libraryの所有権を直接渡さない。`Create` で生成した不透明Instanceは同じDLLの `Destroy` で破棄し、Object操作はVersionとSizeを持つC ABIの `EngineScriptHostAPI` 関数表を通す。詳細と実装例は `SCRIPT_SYSTEM.md` 及び `Samples/RotationScriptModule` を参照する。

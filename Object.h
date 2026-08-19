@@ -21,6 +21,7 @@
 
 #include "Component.h"
 #include "EntityTypes.h"
+#include "Transform.h"
 
 namespace Engine
 {
@@ -57,21 +58,64 @@ namespace Engine
         //戻り値 : コンポーネントを含まない複製オブジェクト
         virtual std::unique_ptr<Object> Clone() const;
 
+        //概要：Scene内のObject IDを取得する
+        //引数：なし
+        //戻り値：登録済みID、未登録時は無効ID
         ObjectID GetID() const { return ID; }
+
+        //概要：Objectの具象種別を取得する
+        //引数：なし
+        //戻り値：Object種別
         ObjectType GetType() const { return Type; }
+
+        //概要：同じObject型内で一意な名前を取得する
+        //引数：なし
+        //戻り値：解決済みObject名
         const std::string& GetName() const { return Name; }
 
-        //Objectが更新と描画の対象か確認する
-        //戻り値: Objectが有効な場合はtrue
+        //概要：Objectが更新と描画の対象か確認する
+        //引数：なし
+        //戻り値：Objectが有効な場合はtrue
         bool IsActive() const { return Active; }
+        //概要：Objectと所有Componentの有効状態を変更する
+        //引数：active=有効にする場合はtrue
+        //戻り値：なし
         void SetActive(bool active) { Active = active; }
 
-        void SetPosition(const DirectX::XMFLOAT3& position) { Position = position; }
-        void SetRotation(const DirectX::XMFLOAT3& rotation) { Rotation = rotation; }
-        void SetScale(const DirectX::XMFLOAT3& scale) { Scale = scale; }
-        const DirectX::XMFLOAT3& GetPosition() const { return Position; }
-        const DirectX::XMFLOAT3& GetRotation() const { return Rotation; }
-        const DirectX::XMFLOAT3& GetScale() const { return Scale; }
+        //概要：ObjectのLocal座標を変更する
+        //引数：position=設定するXYZ座標
+        //戻り値：なし
+        void SetPosition(const DirectX::XMFLOAT3& position);
+
+        //概要：ObjectのLocal XYZ回転角を変更する
+        //引数：rotation=ラジアン単位のXYZ回転角
+        //戻り値：なし
+        void SetRotation(const DirectX::XMFLOAT3& rotation);
+
+        //概要：ObjectのLocal XYZ拡縮率を変更する
+        //引数：scale=設定するXYZ拡縮率
+        //戻り値：なし
+        void SetScale(const DirectX::XMFLOAT3& scale);
+
+        //概要：ObjectのLocal座標を取得する
+        //引数：なし
+        //戻り値：XYZ Local座標
+        const DirectX::XMFLOAT3& GetPosition() const;
+
+        //概要：ObjectのLocal XYZ回転角を取得する
+        //引数：なし
+        //戻り値：ラジアン単位のXYZ回転角
+        const DirectX::XMFLOAT3& GetRotation() const;
+
+        //概要：ObjectのLocal XYZ拡縮率を取得する
+        //引数：なし
+        //戻り値：XYZ拡縮率
+        const DirectX::XMFLOAT3& GetScale() const;
+
+        Transform& GetTransform();
+        const Transform& GetTransform() const;
+        ObjectID GetParentID() const;
+        const std::vector<ObjectID>& GetChildIDs() const;
 
         //オブジェクトのワールド行列を取得する
         //戻り値 : 拡縮、回転、平行移動を合成したワールド行列
@@ -165,9 +209,9 @@ namespace Engine
         ObjectType Type; //オブジェクト種別
         std::string Name; //同型内で一意な解決済み名
         bool Active; //更新と描画の対象にする場合true
-        DirectX::XMFLOAT3 Position; //ワールド座標
-        DirectX::XMFLOAT3 Rotation; //ラジアン単位のXYZ回転
-        DirectX::XMFLOAT3 Scale; //XYZ拡縮率
+        Transform ObjectTransform; //必ず存在し削除できないLocal姿勢
+        Object* Parent; //親Objectへの非所有参照、Rootの場合はnullptr
+        std::vector<ObjectID> Children; //登録順の直接Child Object ID
         std::vector<std::unique_ptr<Component>> Components; //安定スロットを持つ所有コンポーネント
         std::vector<std::unordered_map<std::string, ComponentID>> ComponentIDByNameByType; //型と名前からIDを引く索引
         std::vector<std::unordered_map<std::string, std::uint32_t>> ComponentSuffixByNameByType; //同名接尾辞の次回候補

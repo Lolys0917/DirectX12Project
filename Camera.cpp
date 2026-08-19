@@ -167,21 +167,33 @@ namespace Engine
         return true;
     }
 
+    //概要：Cameraが注視するWorld座標を変更する
+    //引数：target=新しいXYZ注視点
+    //戻り値：なし
     void Camera::SetTarget(const DirectX::XMFLOAT3& target)
     {
         Target = target;
     }
 
+    //概要：Camera View行列の上方向Vectorを変更する
+    //引数：up=新しいXYZ上方向Vector
+    //戻り値：なし
     void Camera::SetUp(const DirectX::XMFLOAT3& up)
     {
         Up = up;
     }
 
+    //概要：Camera操作時の毎秒移動速度を変更する
+    //引数：moveSpeed=0以上へ補正する毎秒移動量
+    //戻り値：なし
     void Camera::SetMoveSpeed(float moveSpeed)
     {
         MoveSpeed = std::max(0.0f, moveSpeed);
     }
 
+    //概要：所有Object又は切断時座標からView行列を作成する
+    //引数：なし
+    //戻り値：現在CameraのView行列
     DirectX::XMMATRIX Camera::GetViewMatrix() const
     {
         const DirectX::XMFLOAT3 Position = GetPosition(); //所有Objectから得たCamera位置
@@ -193,6 +205,9 @@ namespace Engine
         );
     }
 
+    //概要：現在解像度と投影設定からProjection行列を作成する
+    //引数：なし
+    //戻り値：現在CameraのProjection行列
     DirectX::XMMATRIX Camera::GetProjectionMatrix() const
     {
         return DirectX::XMMatrixPerspectiveFovLH(
@@ -203,11 +218,17 @@ namespace Engine
         );
     }
 
+    //概要：現在CameraのView行列とProjection行列を合成する
+    //引数：なし
+    //戻り値：View Projection行列
     DirectX::XMMATRIX Camera::GetViewProjectionMatrix() const
     {
         return GetViewMatrix() * GetProjectionMatrix();
     }
 
+    //概要：所有Object又は切断時のCamera World座標を取得する
+    //引数：なし
+    //戻り値：CameraのXYZ World座標
     DirectX::XMFLOAT3 Camera::GetPosition() const
     {
         const Object* Owner = GetOwner(); //Camera Componentを所有するObject
@@ -234,11 +255,17 @@ namespace Engine
         }
     }
 
+    //概要：Camera専用Color／Depth RenderTextureを取得する
+    //引数：なし
+    //戻り値：初期化済みRenderTexture、未初期化時はnullptr
     RenderTexture* Camera::GetRenderTexture()
     {
         return OutputTexture.get();
     }
 
+    //概要：Camera専用RenderTextureを読み取り専用で取得する
+    //引数：なし
+    //戻り値：読み取り専用RenderTexture、未初期化時はnullptr
     const RenderTexture* Camera::GetRenderTexture() const
     {
         return OutputTexture.get();

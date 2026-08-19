@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v3.00  EngineAPIとEditor操作Queue及びObject Tree更新を接続
 //||  2026_07_13  v2.10  編集: MessageLog表示、通常ログ消去、常設ログ及び操作ログを接続
 //||  2026_07_13  v2.00  Editor UIとStart、Stop、Tick、動的FPSを接続
 //||  2026_06_01  v1.00  新規作成
@@ -18,10 +19,10 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include "FrameRateController.h"
-#include "GameApp.h"
+#include "GameRuntime.h"
 #include "MessageLog.h"
 #include "WinApp.h"
 
@@ -187,18 +188,19 @@ int WINAPI WinMain(
     }
 
 	Engine::WindowsUISettings UISettings; // Windows標準UIの既定設定
-	UISettings.TexturePath = L"c_1576721479650-1-2.jpg";
+    UISettings.TexturePath = L"UIDemo.png";
 
 	Window.SetUISettings(UISettings);
 
     Log.AddLog("[Info] WinMain | Editor Window created.");
 
-    Engine::GameApp Application; //Sceneと描画基盤を所有するゲームアプリケーション
+    Engine::GameRuntime Runtime; //UIとは別ThreadでGame更新と描画を所有するRuntime
 
-    if (!Application.Initialize(
+    if (!Runtime.Start(
         Window.GetRenderHwnd(),
         Window.GetRenderWidth(),
-        Window.GetRenderHeight()))
+        Window.GetRenderHeight(),
+        Window.GetTargetFrameRate()))
     {
         Log.AddPermanentLog(
             "[Critical] WinMain | DirectX 12 or DefaultScene initialization failed."
@@ -220,16 +222,32 @@ int WINAPI WinMain(
         return -1;
     }
 
-    Engine::FrameRateController FrameRate; //再生状態と固定更新間隔の管理器
-    FrameRate.SetTargetFrameRate(Window.GetTargetFrameRate());
-
-    bool NeedsDraw = true; //Scene出力を再描画する必要がある場合はtrue
     std::uint64_t DisplayedLogRevision =
         (std::numeric_limits<std::uint64_t>::max)(); // UIへ最後に反映したログ更新番号
     RefreshLogDisplay(Window, DisplayedLogRevision);
+    Engine::EditorSnapshot InitialSnapshot; //Game Threadが初期化した最初のEngine状態
+
+    if (Runtime.PollEditorSnapshot(InitialSnapshot))
+    {
+        Window.UpdateEditorSnapshot(InitialSnapshot);
+    }
 
     while (Window.ProcessMessage())
     {
+        Engine::EditorCommand EditorCommand; //Object Treeで発生した未処理Engine操作
+
+        while (Window.ConsumeEditorCommand(EditorCommand))
+        {
+            Runtime.QueueEditorCommand(std::move(EditorCommand));
+        }
+
+        Engine::EditorSnapshot Snapshot; //Game Threadから受け取る最新Engine構造
+
+        if (Runtime.PollEditorSnapshot(Snapshot))
+        {
+            Window.UpdateEditorSnapshot(Snapshot);
+        }
+
         if (Window.ConsumeClearLogs())
         {
             Log.ClearLogs();
@@ -240,80 +258,44 @@ int WINAPI WinMain(
 
         if (Window.ConsumeStart())
         {
-            FrameRate.Start();
-            Log.AddLog("[Info] Playback | Start requested.");
+            Runtime.RequestPlaybackStart();
         }
 
         if (Window.ConsumeStop())
         {
-            FrameRate.Stop();
-            Log.AddLog("[Info] Playback | Stop requested.");
+            Runtime.RequestPlaybackStop();
         }
 
         if (Window.ConsumeTick())
         {
-            FrameRate.RequestTick();
+            Runtime.RequestTick();
             Log.AddLog("[Info] Playback | Single-frame Tick requested.");
         }
 
-        const uint32_t RequestedFrameRate =
-            Window.GetTargetFrameRate(); //EditまたはTrackbarで選択された最新FPS
-
-        if (RequestedFrameRate != FrameRate.GetTargetFrameRate())
-        {
-            FrameRate.SetTargetFrameRate(RequestedFrameRate);
-
-            char FrameRateMessage[128]{}; // 変更後FPSを表示する操作ログ
-            sprintf_s(
-                FrameRateMessage,
-                "[Info] Playback | Target frame rate changed to %u FPS.",
-                RequestedFrameRate
-            );
-            Log.AddLog(FrameRateMessage);
-        }
+        Runtime.SetTargetFrameRate(Window.GetTargetFrameRate());
 
         Engine::RenderWindowSize RenderSize{}; //未処理のviewportサイズ変更
 
         if (Window.ConsumeResize(RenderSize))
         {
-            if (!Application.Resize(RenderSize.Width, RenderSize.Height))
-            {
-                Log.AddPermanentLog(
-                    "[Critical] WinMain | Render viewport Resize failed; execution was stopped."
-                );
-                MessageBoxW(
-                    Window.GetHWND(),
-                    L"描画領域のサイズ変更に失敗しました。",
-                    L"DirectX 12 Engine",
-                    MB_OK | MB_ICONERROR
-                );
-
-                break;
-            }
-
-            NeedsDraw = true;
-        }
-
-        float DeltaTime = 0.0f; //今回の固定Updateに使用する秒数
-
-        if (FrameRate.TryConsumeStep(DeltaTime))
-        {
-            Application.Update(DeltaTime);
-            NeedsDraw = true;
-        }
-
-        if (NeedsDraw)
-        {
-            Application.Draw();
-            NeedsDraw = false;
+            Runtime.RequestResize(RenderSize);
         }
 
         RefreshLogDisplay(Window, DisplayedLogRevision);
 
+        if (!Runtime.IsOperational())
+        {
+            Log.AddPermanentLog(
+                "[Critical] WinMain | Game Runtime Thread stopped unexpectedly."
+            );
+            RefreshLogDisplay(Window, DisplayedLogRevision);
+            break;
+        }
+
         const DWORD WaitResult = MsgWaitForMultipleObjectsEx(
             0,
             nullptr,
-            FrameRate.GetWaitMilliseconds(),
+            16,
             QS_ALLINPUT,
             MWMO_INPUTAVAILABLE
         ); // 次の更新時刻又はWindows Messageを待つ結果
@@ -328,7 +310,7 @@ int WINAPI WinMain(
         }
     }
 
-    Application.Finalize();
+    Runtime.Shutdown();
     Window.Destroy();
 
     if (MustUninitializeCom)

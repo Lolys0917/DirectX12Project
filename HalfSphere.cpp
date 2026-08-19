@@ -31,6 +31,9 @@ namespace Engine
     //半球を破棄する
     HalfSphere::~HalfSphere() = default;
 
+    //概要：半球半径を安全な正値へ補正してMeshを再構築する
+    //引数：radius=新しい半球半径
+    //戻り値：なし
     void HalfSphere::SetRadius(float radius)
     {
         constexpr float MinimumRadius = 0.0001f; //ゼロ半球を防ぐ最小半径
@@ -38,6 +41,9 @@ namespace Engine
         BuildMesh();
     }
 
+    //概要：半球の経度と緯度分割数を変更してMeshを再構築する
+    //引数：slice=経度分割数、stack=緯度分割数
+    //戻り値：なし
     void HalfSphere::SetDivision(std::uint32_t slice, std::uint32_t stack)
     {
         Slice = (std::max<std::uint32_t>)(slice, 3);

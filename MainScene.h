@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v1.10  基底更新を維持するNative Main更新処理へ修正
 //||  2026_07_13  v1.00  新規作成: Scene継承のMainSceneを追加
 //||
 
@@ -28,7 +29,9 @@ namespace Engine
         // Sceneが所有するComponentを基底Destructorで終了する
         ~MainScene() override;
 
-		void Update(float deltaTime) override;
+        // MainプログラムとしてScene全体とデモObjectをネイティブAPIで更新する
+        // deltaTime: 前フレームからの経過秒数
+        void Update(float deltaTime) override;
 
     protected:
         // DemoModel ObjectとOBJModel ComponentをMainSceneへ追加する

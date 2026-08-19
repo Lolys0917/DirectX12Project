@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v1.10  Global Pointerを削除しObjectManager経由の更新へ修正
 //||  2026_07_13  v1.00  新規作成: DemoModel生成をGameAppからSceneへ移動
 //||
 
@@ -13,6 +14,7 @@
 
 #include <DirectXMath.h>
 
+#include "Box.h"
 #include "DirectX12.h"
 #include "MessageLog.h"
 #include "Object.h"
@@ -21,8 +23,6 @@
 
 namespace Engine
 {
-    OBJModel* DemoModel;
-    Object* DemoObject;
     // 未初期化のMainSceneを作成する
     MainScene::MainScene() = default;
 
@@ -36,7 +36,7 @@ namespace Engine
     {
         ObjectManager& Objects =
             GetObjectManager(); // MainScene専用ObjectManager
-        DemoObject =
+        Object* DemoObject =
             Objects.CreateObject<Object>("DemoModel"); // DemoModelを所有するObject
 
         if (DemoObject == nullptr)
@@ -55,7 +55,7 @@ namespace Engine
             0.0f
         ));
 
-        DemoModel = Objects.AddComponent<OBJModel>(
+        OBJModel* DemoModel = Objects.AddComponent<OBJModel>(
             DemoObject->GetID(),
             "DemoModel"
         ); // Cat OBJを描画するModel Component
@@ -79,20 +79,55 @@ namespace Engine
             return false;
         }
 
+        Box* OscillatingBox = Objects.CreateObject<Box>(
+            "OscillatingBox"
+        ); //外部Sub ScriptをAttachする左右移動Box
+
+        if (OscillatingBox == nullptr)
+        {
+            MessageLog::GetInstance().AddLog(
+                "[Error] MainScene | OscillatingBox creation failed."
+            );
+            return false;
+        }
+
+        OscillatingBox->SetPosition(DirectX::XMFLOAT3(-3.0f, 1.0f, 2.0f));
+        OscillatingBox->SetSize(1.4f, 1.4f, 1.4f);
+        OscillatingBox->SetColor(DirectX::XMFLOAT4(0.15f, 0.7f, 0.95f, 1.0f));
+
         MessageLog::GetInstance().AddLog(
             "[Info] MainScene | DemoModel definition created."
+        );
+        MessageLog::GetInstance().AddLog(
+            "[Info] MainScene | OscillatingBox definition created for an attached Sub Script."
         );
         return true;
     }
 
+    //概要：基底Sceneの全Componentを更新した後にMain固有の回転処理を実行する
+    //引数：deltaTime=前フレームからの経過秒数
+    //戻り値：なし
     void MainScene::Update(float deltaTime)
     {
-		DemoObject->SetRotation(DirectX::XMFLOAT3(
-            DemoObject->GetRotation().x,
-            DemoObject->GetRotation().y + 1.0f * deltaTime,
-            DemoObject->GetRotation().z
-		));
-	}
+        Scene::Update(deltaTime);
+
+        Object* DemoObject = GetObjectManager().FindObject(
+            ObjectType::Object,
+            "DemoModel"
+        ); //MainプログラムがネイティブAPIで直接操作するデモObject
+
+        if (DemoObject == nullptr)
+        {
+            return;
+        }
+
+        const DirectX::XMFLOAT3& Rotation = DemoObject->GetRotation(); //更新前の回転角
+        DemoObject->SetRotation(DirectX::XMFLOAT3(
+            Rotation.x,
+            Rotation.y + deltaTime,
+            Rotation.z
+        ));
+    }
 
     // Clone先としてMainScene型の未初期化Instanceを作成する
     // 戻り値: 新しいMainScene

@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v2.20  Object複製とObject／Component名前変更APIを追加
 //||  2026_07_13  v2.10  IRenderable Objectの描画Lifecycleを統合
 //||  2026_07_13  v2.00  強いID、Vector<Map>索引、所有者別Component索引を実装
 //||
@@ -47,9 +48,9 @@ namespace Engine
         //戻り値: 代入先ObjectManagerへの参照
         ObjectManager& operator=(const ObjectManager&) = delete;
 
-        //指定型のObjectを生成して型×解決名索引へ登録する
-        //引数: requestedName 希望名、arguments Object構築引数
-        //戻り値: 登録済みObject、失敗時はnullptr
+        //概要：指定型のObjectを生成して型×解決名索引へ登録する
+        //引数：requestedName=希望名、arguments=Object構築引数
+        //戻り値：登録済みObject、失敗時はnullptr
         template<class ObjectClass, class... ArgumentTypes>
         ObjectClass* CreateObject(
             const std::string& requestedName,
@@ -76,9 +77,9 @@ namespace Engine
             const std::string& requestedName
         );
 
-        //指定ObjectへComponentを生成してOwner×型×解決名索引へ登録する
-        //引数: ownerID 所有Object、requestedName 希望名、arguments Component構築引数
-        //戻り値: 登録済みComponent、失敗時はnullptr
+        //概要：指定ObjectへComponentを生成してOwner×型×解決名索引へ登録する
+        //引数：ownerID=所有Object、requestedName=希望名、arguments=Component構築引数
+        //戻り値：登録済みComponent、失敗時はnullptr
         template<class ComponentClass, class... ArgumentTypes>
         ComponentClass* AddComponent(
             ObjectID ownerID,
@@ -113,10 +114,42 @@ namespace Engine
         //戻り値: 削除した場合はtrue
         bool RemoveObject(ObjectID objectID);
 
+        bool SetParent(
+            ObjectID childID,
+            ObjectID parentID,
+            bool keepWorldTransform
+        );
+
+        bool IsDescendantOf(ObjectID objectID, ObjectID possibleAncestorID) const;
+
         //Componentを削除してIDとObject内slotをtombstone化する
         //引数: componentID 削除するComponent
         //戻り値: 削除した場合はtrue
         bool RemoveComponent(ComponentID componentID);
+
+        //Objectと所有Componentを新しいIDで複製する
+        //引数: sourceID 複製元Object、requestedName 複製先の希望名
+        //戻り値: 登録済みの複製Object、失敗時はnullptr
+        Object* CloneObject(
+            ObjectID sourceID,
+            const std::string& requestedName
+        );
+
+        //Object名を型内で一意な名前へ変更する
+        //引数: objectID 変更対象Object、requestedName 新しい希望名
+        //戻り値: 名前を変更できた場合はtrue
+        bool RenameObject(
+            ObjectID objectID,
+            const std::string& requestedName
+        );
+
+        //Component名を所有Objectかつ型内で一意な名前へ変更する
+        //引数: componentID 変更対象Component、requestedName 新しい希望名
+        //戻り値: 名前を変更できた場合はtrue
+        bool RenameComponent(
+            ComponentID componentID,
+            const std::string& requestedName
+        );
 
         //Object IDから走査せず登録Objectを取得する
         //引数: objectID 検索するObject ID
@@ -242,6 +275,8 @@ namespace Engine
         //引数: componentType 判定するComponent型
         //戻り値: 型が有効な場合はtrue
         static bool IsValidComponentType(ComponentType componentType);
+
+        void RemoveChildReference(Object& parent, ObjectID childID);
 
         std::vector<std::unique_ptr<Object>> ObjectsByID; //ObjectIDを直接slotに使う所有配列
         std::vector<bool> RenderableObjectInitializedByID; //ObjectIDごとの描画Resource初期化状態

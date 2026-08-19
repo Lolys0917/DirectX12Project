@@ -134,6 +134,9 @@ namespace Engine
     {
     }
 
+    //概要：Box ColliderのLocal寸法を安全な正値へ補正する
+    //引数：size=設定するXYZ寸法
+    //戻り値：なし
     void BoxCollider::SetSize(const DirectX::XMFLOAT3& size)
     {
         constexpr float MinimumSize = 0.0001f; //ゼロ形状を防ぐ最小寸法
@@ -169,6 +172,9 @@ namespace Engine
     {
     }
 
+    //概要：Sphere ColliderのLocal半径を安全な正値へ補正する
+    //引数：radius=設定する球半径
+    //戻り値：なし
     void SphereCollider::SetRadius(float radius)
     {
         constexpr float MinimumRadius = 0.0001f; //ゼロ球を防ぐ最小半径
@@ -206,6 +212,9 @@ namespace Engine
     {
     }
 
+    //概要：Capsule ColliderのLocal半径と全高を安全な値へ補正する
+    //引数：radius=Capsule半径、height=両端を含む全高
+    //戻り値：なし
     void CapsuleCollider::SetSize(float radius, float height)
     {
         constexpr float MinimumRadius = 0.0001f; //ゼロ形状を防ぐ最小半径
@@ -256,6 +265,9 @@ namespace Engine
     {
     }
 
+    //概要：Cylinder ColliderのLocal半径と高さを安全な正値へ補正する
+    //引数：radius=円柱半径、height=円柱高さ
+    //戻り値：なし
     void CylinderCollider::SetSize(float radius, float height)
     {
         constexpr float MinimumSize = 0.0001f; //ゼロ形状を防ぐ最小寸法
@@ -292,6 +304,9 @@ namespace Engine
     {
     }
 
+    //概要：Plane ColliderのLocal法線と原点からの距離を設定する
+    //引数：normal=正規化する平面法線、distance=Local原点からの距離
+    //戻り値：なし
     void PlaneCollider::SetPlane(const DirectX::XMFLOAT3& normal, float distance)
     {
         DirectX::XMVECTOR NormalVector = DirectX::XMLoadFloat3(&normal); //正規化対象法線

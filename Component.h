@@ -67,19 +67,43 @@ namespace Engine
         //戻り値 : 所有者とIDを持たない複製コンポーネント
         virtual std::unique_ptr<Component> Clone() const;
 
+        //概要：Scene内のComponent IDを取得する
+        //引数：なし
+        //戻り値：登録済みID、未登録時は無効ID
         ComponentID GetID() const { return ID; }
+
+        //概要：Componentの具象種別を取得する
+        //引数：なし
+        //戻り値：Component種別
         ComponentType GetType() const { return Type; }
+
+        //概要：所有Objectかつ型内で一意な名前を取得する
+        //引数：なし
+        //戻り値：解決済みComponent名
         const std::string& GetName() const { return Name; }
+
+        //概要：Componentを所有するObjectを取得する
+        //引数：なし
+        //戻り値：所有Object、未登録時はnullptr
         Object* GetOwner() { return Owner; }
+
+        //概要：Componentを所有するObjectを読み取り専用で取得する
+        //引数：なし
+        //戻り値：読み取り専用所有Object、未登録時はnullptr
         const Object* GetOwner() const { return Owner; }
 
-        //Componentが更新と描画の対象か確認する
-        //戻り値: Componentが有効な場合はtrue
+        //概要：Componentが更新と描画の対象か確認する
+        //引数：なし
+        //戻り値：Componentが有効な場合はtrue
         bool IsActive() const { return Active; }
 
-        //Componentの初期化が完了しているか確認する
-        //戻り値: Initialize成功後かつFinalize前の場合はtrue
+        //概要：Componentの初期化が完了しているか確認する
+        //引数：なし
+        //戻り値：Initialize成功後かつFinalize前の場合はtrue
         bool IsInitialized() const { return Initialized; }
+        //概要：Componentの更新と描画の有効状態を変更する
+        //引数：active=有効にする場合はtrue
+        //戻り値：なし
         void SetActive(bool active) { Active = active; }
 
     protected:

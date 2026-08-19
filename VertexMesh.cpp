@@ -153,12 +153,18 @@ float4 PSMain(VSOutput input) : SV_TARGET
         ReleaseGPUResource();
     }
 
+    //概要：CPU頂点一覧を置き換えてGPU Bufferを再生成対象にする
+    //引数：vertices=新しい頂点一覧
+    //戻り値：なし
     void VertexMesh::SetVertices(const std::vector<Vertex>& vertices)
     {
         Vertices = vertices;
         GPUResourceDirty = true;
     }
 
+    //概要：CPU Index一覧を置き換えてGPU Bufferを再生成対象にする
+    //引数：indices=新しい三角形Index一覧
+    //戻り値：なし
     void VertexMesh::SetIndices(const std::vector<uint32_t>& indices)
     {
         Indices = indices;
@@ -500,21 +506,33 @@ float4 PSMain(VSOutput input) : SV_TARGET
         return true;
     }
 
+    //概要：CPU側の頂点一覧を取得する
+    //引数：なし
+    //戻り値：読み取り専用頂点一覧
     const std::vector<Vertex>& VertexMesh::GetVertices() const
     {
         return Vertices;
     }
 
+    //概要：CPU側の三角形Index一覧を取得する
+    //引数：なし
+    //戻り値：読み取り専用Index一覧
     const std::vector<uint32_t>& VertexMesh::GetIndices() const
     {
         return Indices;
     }
 
+    //概要：CPU側の頂点数を取得する
+    //引数：なし
+    //戻り値：登録頂点数
     uint32_t VertexMesh::GetVertexCount() const
     {
         return static_cast<uint32_t>(Vertices.size());
     }
 
+    //概要：CPU側の三角形Index数を取得する
+    //引数：なし
+    //戻り値：登録Index数
     uint32_t VertexMesh::GetIndexCount() const
     {
         return static_cast<uint32_t>(Indices.size());

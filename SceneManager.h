@@ -7,6 +7,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v1.30  Editor Snapshot用Scene ID列挙APIを追加
 //||  2026_07_13  v1.20  編集: 派生Scene生成とMainScene設定APIを追加
 //||  2026_07_13  v1.00  新規作成: 複数Active SceneとViewScene管理を追加
 //||
@@ -69,15 +70,9 @@ namespace Engine
             uint32_t height
         );
 
-        /**
-         * 指定したScene派生型を初期化してManagerへ登録する
-         * @tparam SceneType default構築可能なScene派生型
-         * @param dx12 Scene内ComponentのGPU初期化に使用する描画基盤
-         * @param name 同名時に数値接尾辞を付ける希望Scene名
-         * @param width Camera RenderTextureの初期横幅
-         * @param height Camera RenderTextureの初期縦幅
-         * @return 作成済みSceneID、失敗した場合は無効SceneID
-         */
+        //概要：指定Scene派生型を初期化してManagerへ登録する
+        //引数：dx12=描画基盤、name=希望名、width=Camera幅、height=Camera高さ
+        //戻り値：作成済みScene ID、失敗した場合は無効Scene ID
         template<typename SceneType>
         SceneID CreateScene(
             DirectX12& dx12,
@@ -104,15 +99,9 @@ namespace Engine
             );
         }
 
-        /**
-         * 指定したScene派生型を作成しActive、Main、ViewSceneへ一括設定する
-         * @tparam SceneType default構築可能なScene派生型
-         * @param dx12 Scene内ComponentのGPU初期化に使用する描画基盤
-         * @param name 同名時に数値接尾辞を付ける希望Scene名
-         * @param width Camera RenderTextureの初期横幅
-         * @param height Camera RenderTextureの初期縦幅
-         * @return MainSceneへ設定したSceneID、失敗した場合は無効SceneID
-         */
+        //概要：指定Scene派生型を作成しActive、Main、View Sceneへ一括設定する
+        //引数：dx12=描画基盤、name=希望名、width=Camera幅、height=Camera高さ
+        //戻り値：Main Sceneへ設定したScene ID、失敗時は無効Scene ID
         template<typename SceneType>
         SceneID CreateMainScene(
             DirectX12& dx12,
@@ -177,6 +166,10 @@ namespace Engine
         // name: 検索対象の解決済みScene名
         // 戻り値: SceneへのPointer、存在しない場合はnullptr
         const Scene* FindScene(const std::string& name) const;
+
+        // 有効Scene IDを登録順で取得する
+        // 戻り値: Tombstoneを除くScene ID一覧
+        std::vector<SceneID> GetSceneIDs() const;
 
         // SceneのActive状態を変更する
         // sceneID: 状態を変更するSceneID

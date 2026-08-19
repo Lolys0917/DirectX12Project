@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_17  v1.10  Script Component種別と関数定義Comment形式を追加
 //||  2026_07_13  v1.00  新規作成
 //||
 
@@ -23,25 +24,32 @@ namespace Engine
     public:
         static constexpr std::uint32_t InvalidValue = 0; //無効なシーンID値
 
-        //無効なシーンIDを作成する
+        //概要：無効なScene IDを作成する
+        //引数：なし
+        //戻り値：なし
         constexpr SceneID() noexcept = default;
 
-        //指定値からシーンIDを作成する
-        //value : シーンID値
+        //概要：指定整数値からScene IDを作成する
+        //引数：value=Scene ID値
+        //戻り値：なし
         explicit constexpr SceneID(std::uint32_t value) noexcept
             : Value(value)
         {
         }
 
+        //概要：Scene IDの整数値を取得する
+        //引数：なし
+        //戻り値：SceneManager内のID値
         constexpr std::uint32_t GetValue() const noexcept { return Value; }
 
-        //シーンIDが登録済みの有効値か判定する
-        //戻り値: ID値が無効値以外の場合はtrue
+        //概要：Scene IDが登録済みの有効値か判定する
+        //引数：なし
+        //戻り値：ID値が無効値以外の場合はtrue
         constexpr bool IsValid() const noexcept { return Value != InvalidValue; }
 
-        //シーンID値を比較する
-        //引数: other 比較対象のシーンID
-        //戻り値: ID値の大小関係
+        //概要：Scene ID値を三方向比較する
+        //引数：other=比較対象Scene ID
+        //戻り値：ID値の大小関係
         auto operator<=>(const SceneID& other) const = default;
 
     private:
@@ -53,25 +61,32 @@ namespace Engine
     public:
         static constexpr std::uint32_t InvalidValue = 0; //無効なオブジェクトID値
 
-        //無効なオブジェクトIDを作成する
+        //概要：無効なObject IDを作成する
+        //引数：なし
+        //戻り値：なし
         constexpr ObjectID() noexcept = default;
 
-        //指定値からオブジェクトIDを作成する
-        //value : オブジェクトID値
+        //概要：指定整数値からObject IDを作成する
+        //引数：value=Object ID値
+        //戻り値：なし
         explicit constexpr ObjectID(std::uint32_t value) noexcept
             : Value(value)
         {
         }
 
+        //概要：Object IDの整数値を取得する
+        //引数：なし
+        //戻り値：Scene内のObject ID値
         constexpr std::uint32_t GetValue() const noexcept { return Value; }
 
-        //オブジェクトIDが登録済みの有効値か判定する
-        //戻り値: ID値が無効値以外の場合はtrue
+        //概要：Object IDが登録済みの有効値か判定する
+        //引数：なし
+        //戻り値：ID値が無効値以外の場合はtrue
         constexpr bool IsValid() const noexcept { return Value != InvalidValue; }
 
-        //オブジェクトID値を比較する
-        //引数: other 比較対象のオブジェクトID
-        //戻り値: ID値の大小関係
+        //概要：Object ID値を三方向比較する
+        //引数：other=比較対象Object ID
+        //戻り値：ID値の大小関係
         auto operator<=>(const ObjectID& other) const = default;
 
     private:
@@ -83,25 +98,32 @@ namespace Engine
     public:
         static constexpr std::uint32_t InvalidValue = 0; //無効なコンポーネントID値
 
-        //無効なコンポーネントIDを作成する
+        //概要：無効なComponent IDを作成する
+        //引数：なし
+        //戻り値：なし
         constexpr ComponentID() noexcept = default;
 
-        //指定値からコンポーネントIDを作成する
-        //value : コンポーネントID値
+        //概要：指定整数値からComponent IDを作成する
+        //引数：value=Component ID値
+        //戻り値：なし
         explicit constexpr ComponentID(std::uint32_t value) noexcept
             : Value(value)
         {
         }
 
+        //概要：Component IDの整数値を取得する
+        //引数：なし
+        //戻り値：Scene内のComponent ID値
         constexpr std::uint32_t GetValue() const noexcept { return Value; }
 
-        //コンポーネントIDが登録済みの有効値か判定する
-        //戻り値: ID値が無効値以外の場合はtrue
+        //概要：Component IDが登録済みの有効値か判定する
+        //引数：なし
+        //戻り値：ID値が無効値以外の場合はtrue
         constexpr bool IsValid() const noexcept { return Value != InvalidValue; }
 
-        //コンポーネントID値を比較する
-        //引数: other 比較対象のコンポーネントID
-        //戻り値: ID値の大小関係
+        //概要：Component ID値を三方向比較する
+        //引数：other=比較対象Component ID
+        //戻り値：ID値の大小関係
         auto operator<=>(const ComponentID& other) const = default;
 
     private:
@@ -135,6 +157,7 @@ namespace Engine
         CapsuleCollider, //カプセルコライダー
         CylinderCollider, //円柱コライダー
         PlaneCollider, //平面コライダー
+        Script, //オブジェクトへ差し込んで毎フレーム実行するスクリプト
         Count //コンポーネント種別数
     };
 }

@@ -26,6 +26,9 @@ namespace Engine
     //プリミティブオブジェクトを破棄する
     PrimitiveObject::~PrimitiveObject() = default;
 
+    //概要：PrimitiveのRGBA色を変更してCPU Meshを再構築する
+    //引数：color=頂点へ設定するRGBA色
+    //戻り値：なし
     void PrimitiveObject::SetColor(const DirectX::XMFLOAT4& color)
     {
         Color = color;

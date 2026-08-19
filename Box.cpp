@@ -30,6 +30,9 @@ namespace Engine
     //直方体を破棄する
     Box::~Box() = default;
 
+    //概要：直方体寸法を安全な正値へ補正してMeshを再構築する
+    //引数：width=X軸幅、height=Y軸高さ、depth=Z軸奥行き
+    //戻り値：なし
     void Box::SetSize(float width, float height, float depth)
     {
         constexpr float MinimumSize = 0.0001f; //ゼロ面を防ぐ最小寸法

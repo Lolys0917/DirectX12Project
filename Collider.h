@@ -32,14 +32,35 @@ namespace Engine
         //コライダーを破棄する
         ~Collider() override;
 
+        //概要：所有ObjectからのCollider中心Offsetを変更する
+        //引数：center=Local XYZ Offset
+        //戻り値：なし
         void SetCenter(const DirectX::XMFLOAT3& center) { Center = center; }
+
+        //概要：所有ObjectからのCollider中心Offsetを取得する
+        //引数：なし
+        //戻り値：Local XYZ Offset
         const DirectX::XMFLOAT3& GetCenter() const { return Center; }
+
+        //概要：ColliderのTrigger状態を変更する
+        //引数：trigger=物理応答を行わないTriggerにする場合はtrue
+        //戻り値：なし
         void SetTrigger(bool trigger) { Trigger = trigger; }
 
         //Colliderが判定専用Triggerか確認する
         //戻り値: 物理応答を行わないTriggerの場合はtrue
+        //概要：Colliderが物理応答を行わないTriggerか確認する
+        //引数：なし
+        //戻り値：Triggerの場合はtrue
         bool IsTrigger() const { return Trigger; }
+        //概要：衝突対象を選別するLayer Maskを変更する
+        //引数：layerMask=衝突対象Bit Mask
+        //戻り値：なし
         void SetLayerMask(std::uint32_t layerMask) { LayerMask = layerMask; }
+
+        //概要：衝突対象を選別するLayer Maskを取得する
+        //引数：なし
+        //戻り値：衝突対象Bit Mask
         std::uint32_t GetLayerMask() const { return LayerMask; }
 
         //ブロードフェーズ用ワールドAABBを取得する
@@ -71,6 +92,9 @@ namespace Engine
         BoxCollider();
 
         void SetSize(const DirectX::XMFLOAT3& size);
+        //概要：Box ColliderのLocal XYZ寸法を取得する
+        //引数：なし
+        //戻り値：Local XYZ寸法
         const DirectX::XMFLOAT3& GetSize() const { return Size; }
 
         //回転と拡縮を含む直方体のワールドAABBを取得する
@@ -92,6 +116,9 @@ namespace Engine
         SphereCollider();
 
         void SetRadius(float radius);
+        //概要：Sphere ColliderのLocal半径を取得する
+        //引数：なし
+        //戻り値：Local半径
         float GetRadius() const { return Radius; }
 
         //球を包むワールドAABBを取得する
@@ -113,7 +140,14 @@ namespace Engine
         CapsuleCollider();
 
         void SetSize(float radius, float height);
+        //概要：Capsule ColliderのLocal半径を取得する
+        //引数：なし
+        //戻り値：Local半径
         float GetRadius() const { return Radius; }
+
+        //概要：Capsule ColliderのLocal全高を取得する
+        //引数：なし
+        //戻り値：Local全高
         float GetHeight() const { return Height; }
 
         //カプセルを包むワールドAABBを取得する
@@ -136,7 +170,14 @@ namespace Engine
         CylinderCollider();
 
         void SetSize(float radius, float height);
+        //概要：Cylinder ColliderのLocal半径を取得する
+        //引数：なし
+        //戻り値：Local半径
         float GetRadius() const { return Radius; }
+
+        //概要：Cylinder ColliderのLocal高さを取得する
+        //引数：なし
+        //戻り値：Local高さ
         float GetHeight() const { return Height; }
 
         //回転と拡縮を含む円柱の保守的ワールドAABBを取得する
@@ -159,7 +200,14 @@ namespace Engine
         PlaneCollider();
 
         void SetPlane(const DirectX::XMFLOAT3& normal, float distance);
+        //概要：Plane ColliderのLocal法線を取得する
+        //引数：なし
+        //戻り値：正規化済みLocal法線
         const DirectX::XMFLOAT3& GetNormal() const { return Normal; }
+
+        //概要：Plane ColliderのLocal原点からの距離を取得する
+        //引数：なし
+        //戻り値：Local平面距離
         float GetDistance() const { return Distance; }
 
         //ワールド空間の平面方程式を取得する
