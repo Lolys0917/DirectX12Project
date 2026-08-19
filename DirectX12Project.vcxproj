@@ -158,6 +158,7 @@
     <ClInclude Include="EngineExtensionAPI.h" />
     <ClInclude Include="EntityTypes.h" />
     <ClInclude Include="GameEngineAPI.h" />
+    <ClInclude Include="GameInput.h" />
     <ClInclude Include="GameScriptAPI.h" />
     <ClInclude Include="GameRuntime.h" />
     <ClInclude Include="ExtensionSystem.h" />

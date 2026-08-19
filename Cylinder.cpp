@@ -37,8 +37,16 @@ namespace Engine
     void Cylinder::SetSize(float radius, float height)
     {
         constexpr float MinimumSize = 0.0001f; //ゼロ形状を防ぐ最小寸法
-        Radius = (std::max)(radius, MinimumSize);
-        Height = (std::max)(height, MinimumSize);
+        const float NewRadius = (std::max)(radius, MinimumSize);
+        const float NewHeight = (std::max)(height, MinimumSize);
+
+        if (Radius == NewRadius && Height == NewHeight)
+        {
+            return;
+        }
+
+        Radius = NewRadius;
+        Height = NewHeight;
         BuildMesh();
     }
 
@@ -47,7 +55,14 @@ namespace Engine
     //戻り値：なし
     void Cylinder::SetDivision(std::uint32_t slice)
     {
-        Slice = (std::max<std::uint32_t>)(slice, 3);
+        const std::uint32_t NewSlice = (std::max<std::uint32_t>)(slice, 3);
+
+        if (Slice == NewSlice)
+        {
+            return;
+        }
+
+        Slice = NewSlice;
         BuildMesh();
     }
 

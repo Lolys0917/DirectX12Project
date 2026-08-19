@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_20  v2.10  色変更を頂点再生成せず描画定数へ反映
 //||  2026_07_13  v2.00  RenderContext共通Mesh描画とGPU終了処理を実装
 //||  2026_07_13  v1.00  新規作成
 //||
@@ -26,13 +27,19 @@ namespace Engine
     //プリミティブオブジェクトを破棄する
     PrimitiveObject::~PrimitiveObject() = default;
 
-    //概要：PrimitiveのRGBA色を変更してCPU Meshを再構築する
+    //概要：PrimitiveのRGBA色を変更して次の描画定数へ反映する
     //引数：color=頂点へ設定するRGBA色
     //戻り値：なし
     void PrimitiveObject::SetColor(const DirectX::XMFLOAT4& color)
     {
+        if (Color.x == color.x && Color.y == color.y && Color.z == color.z &&
+            Color.w == color.w)
+        {
+            return;
+        }
+
         Color = color;
-        BuildMesh();
+        Mesh.SetVertexColor(Color);
     }
 
     //CPUメッシュからGPU資源を作成する

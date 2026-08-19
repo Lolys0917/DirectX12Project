@@ -19,6 +19,7 @@
 #include <utility>
 
 #include "DirectX12.h"
+#include "GameInput.h"
 #include "Object.h"
 #include "RenderContext.h"
 
@@ -81,22 +82,22 @@ namespace Engine
         DirectX::XMFLOAT3 Position = GetPosition(); //更新前のCamera位置
         const float Move = MoveSpeed * deltaTime; //今回の更新で移動する距離
 
-        if ((GetAsyncKeyState(VK_LEFT) & 0x8000) != 0)
+        if (GameInput::IsKeyDown(VK_LEFT))
         {
             Position.x -= Move;
         }
 
-        if ((GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0)
+        if (GameInput::IsKeyDown(VK_RIGHT))
         {
             Position.x += Move;
         }
 
-        if ((GetAsyncKeyState(VK_UP) & 0x8000) != 0)
+        if (GameInput::IsKeyDown(VK_UP))
         {
             Position.z += Move;
         }
 
-        if ((GetAsyncKeyState(VK_DOWN) & 0x8000) != 0)
+        if (GameInput::IsKeyDown(VK_DOWN))
         {
             Position.z -= Move;
         }

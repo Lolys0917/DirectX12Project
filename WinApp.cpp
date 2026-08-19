@@ -36,6 +36,7 @@
 #include <cwctype>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <sstream>
@@ -84,6 +85,7 @@ namespace Engine
         constexpr int ProgramSuggestionListControlId = 1041; // Programコード補完一覧ID
         constexpr int ProgramRoleControlId = 1042;       // Main又はScript役割説明Label ID
         constexpr int RestoreProgramControlId = 1043;    // 最終Compile成功Source復元Button ID
+        constexpr int PauseControlId = 1044;             // 状態を保持する一時停止Button ID
         constexpr UINT_PTR ProgramEditorSubclassId = 5001; // RichEdit補完Subclass識別子
         constexpr UINT_PTR ProgramAutomationTimerId = 4001; // 自動保存とCompile監視Timer ID
         constexpr UINT ProgramAutomationTimerInterval = 200; // 自動処理確認間隔ms
@@ -171,7 +173,12 @@ namespace Engine
             L"Init", L"Update", L"End", L"ENGINE_REGISTER_SCENE",
             L"CreateCapsuleModel", L"CreateBox", L"CreateSphere",
             L"SetSize", L"SetPosition", L"SetTransform", L"SetColor",
-            L"Exists", L"AttachScript", L"Advanced",
+            L"CreateMany", L"CreateBoxes", L"CreateCapsules", L"ObjectHandle",
+            L"ComponentHandle", L"Find", L"FindAll", L"FindByType",
+            L"FindByComponent", L"FindByScript", L"GetComponent", L"GetComponents",
+            L"HasComponent", L"GetID", L"GetName", L"GetType", L"IsValid",
+            L"SetActive", L"Remove", L"Exists", L"AttachScript", L"Advanced",
+            L"StartDestroy", L"EndDestroy", L"ENGINE_REGISTER_SCENE_LIFECYCLE",
             L"LeftArrow", L"UpArrow", L"RightArrow", L"DownArrow",
             L"KeyA", L"KeyB", L"KeyD", L"KeyG", L"KeyR", L"KeyS", L"KeyW"
         }; //Program補完へ常時登録するC++及び外部Engine API識別子
@@ -341,6 +348,7 @@ namespace Engine
         , TransformEditsHwnd{}
         , ApplyObjectButtonHwnd(nullptr)
         , StartButtonHwnd(nullptr)
+        , PauseButtonHwnd(nullptr)
         , StopButtonHwnd(nullptr)
         , TickButtonHwnd(nullptr)
         , StatusLabelHwnd(nullptr)
@@ -379,6 +387,7 @@ namespace Engine
         , SplitDragOffset(0)
         , SplitRatio(DefaultSplitRatio)
         , StartRequested(false)
+        , PauseRequested(false)
         , StopRequested(false)
         , ResizeRequested(false)
         , SplitDragging(false)
@@ -386,7 +395,7 @@ namespace Engine
         , ProgramHorizontalSplitDragging(false)
         , ProgramVerticalSplitDragging(false)
         , TreeDragging(false)
-        , IsPlaying(false)
+        , CurrentPlaybackState(PlaybackState::Stopped)
         , UpdatingFrameRate(false)
         , ClearLogsRequested(false)
         , ClassRegistered(false)
@@ -628,6 +637,7 @@ namespace Engine
         std::fill(std::begin(TransformEditsHwnd), std::end(TransformEditsHwnd), nullptr);
         ApplyObjectButtonHwnd = nullptr;
         StartButtonHwnd = nullptr;
+        PauseButtonHwnd = nullptr;
         StopButtonHwnd = nullptr;
         TickButtonHwnd = nullptr;
         StatusLabelHwnd = nullptr;
@@ -674,6 +684,11 @@ namespace Engine
         ProgramHorizontalSplitDragging = false;
         ProgramVerticalSplitDragging = false;
         TreeDragging = false;
+        StartRequested = false;
+        PauseRequested = false;
+        StopRequested = false;
+        PendingTickCount = 0;
+        CurrentPlaybackState = PlaybackState::Stopped;
         ClearLogsRequested = false;
         ActiveTabIndex = 0;
         CurrentEditorSnapshot = EditorSnapshot{};
@@ -1001,6 +1016,14 @@ namespace Engine
         return WasRequested;
     }
 
+    //Pauseボタンの未処理イベントを1件取得する
+    bool WinApp::ConsumePause()
+    {
+        const bool WasRequested = PauseRequested;
+        PauseRequested = false;
+        return WasRequested;
+    }
+
     /**
      * Stopボタンの未処理イベントを1件取得する
      * @return Stop要求が存在した場合はtrue
@@ -1215,6 +1238,10 @@ namespace Engine
             {
                 Application->UpdateProgramSuggestions(false);
             }
+            else if (Character == L'.' || Character == L'>')
+            {
+                Application->UpdateProgramSuggestions(true);
+            }
             else
             {
                 Application->HideProgramSuggestions();
@@ -1258,6 +1285,13 @@ namespace Engine
         {
             const int ControlId = LOWORD(wparam); // 通知を送信したコントロールID
             const int NotificationCode = HIWORD(wparam); // コントロールの通知種類
+
+            if (ControlId == RenderControlId && NotificationCode == STN_CLICKED)
+            {
+                HideProgramSuggestions();
+                SetFocus(RenderHwnd);
+                return 0;
+            }
 
             if (ControlId == AddObjectControlId && NotificationCode == BN_CLICKED)
             {
@@ -1319,9 +1353,21 @@ namespace Engine
             if (ControlId == StartControlId && NotificationCode == BN_CLICKED)
             {
                 StartRequested = true;
+                PauseRequested = false;
                 StopRequested = false;
                 PendingTickCount = 0;
-                IsPlaying = true;
+                CurrentPlaybackState = PlaybackState::Playing;
+                UpdatePlaybackControls();
+                return 0;
+            }
+
+            if (ControlId == PauseControlId && NotificationCode == BN_CLICKED)
+            {
+                PauseRequested = true;
+                StartRequested = false;
+                StopRequested = false;
+                PendingTickCount = 0;
+                CurrentPlaybackState = PlaybackState::Paused;
                 UpdatePlaybackControls();
                 return 0;
             }
@@ -1330,17 +1376,21 @@ namespace Engine
             {
                 StopRequested = true;
                 StartRequested = false;
+                PauseRequested = false;
                 PendingTickCount = 0;
-                IsPlaying = false;
+                CurrentPlaybackState = PlaybackState::Stopped;
                 UpdatePlaybackControls();
                 return 0;
             }
 
             if (ControlId == TickControlId && NotificationCode == BN_CLICKED)
             {
-                if (!IsPlaying && PendingTickCount < std::numeric_limits<uint32_t>::max())
+                if (CurrentPlaybackState != PlaybackState::Playing &&
+                    PendingTickCount < std::numeric_limits<uint32_t>::max())
                 {
                     ++PendingTickCount;
+                    CurrentPlaybackState = PlaybackState::Paused;
+                    UpdatePlaybackControls();
                 }
 
                 return 0;
@@ -2164,7 +2214,8 @@ namespace Engine
             0,
             WC_STATICW,
             L"",
-            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_BLACKRECT,
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP |
+                SS_BLACKRECT | SS_NOTIFY,
             0,
             0,
             1,
@@ -2598,6 +2649,21 @@ namespace Engine
             nullptr
         );
 
+        PauseButtonHwnd = CreateWindowExW(
+            0,
+            WC_BUTTONW,
+            L"Pause",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | BS_PUSHBUTTON,
+            0,
+            0,
+            1,
+            1,
+            Hwnd,
+            ToControlMenu(PauseControlId),
+            Instance,
+            nullptr
+        );
+
         StopButtonHwnd = CreateWindowExW(
             0,
             WC_BUTTONW,
@@ -2783,6 +2849,7 @@ namespace Engine
             ObjectParentLabelHwnd != nullptr &&
             ApplyObjectButtonHwnd != nullptr &&
             StartButtonHwnd != nullptr &&
+            PauseButtonHwnd != nullptr &&
             StopButtonHwnd != nullptr &&
             TickButtonHwnd != nullptr &&
             StatusLabelHwnd != nullptr &&
@@ -2929,7 +2996,7 @@ namespace Engine
         const int ScaledLogHeaderHeight = ScaleByDpi(LogHeaderHeight); // ログ見出し行の高さ
         const int ScaledClearButtonWidth = ScaleByDpi(ClearLogsButtonWidth); // ログ消去ボタンの幅
         const int ScaledMinimumLogHeight = ScaleByDpi(MinimumLogListHeight); // ログ一覧の最低高
-        const int ButtonWidth = std::max(1, (ContentWidth - Gap * 2) / 3); // 各再生ボタンの幅
+        const int ButtonWidth = std::max(1, (ContentWidth - Gap * 3) / 4); // 各再生ボタンの幅
         int ContentTop = Margin; // 次に配置するコントロールの上位置
 
         MoveWindow(
@@ -2968,7 +3035,7 @@ namespace Engine
             TRUE
         );
         MoveWindow(
-            StopButtonHwnd,
+            PauseButtonHwnd,
             ContentLeft + ButtonWidth + Gap,
             ContentTop,
             ButtonWidth,
@@ -2976,8 +3043,16 @@ namespace Engine
             TRUE
         );
         MoveWindow(
-            TickButtonHwnd,
+            StopButtonHwnd,
             ContentLeft + (ButtonWidth + Gap) * 2,
+            ContentTop,
+            ButtonWidth,
+            ScaledButtonHeight,
+            TRUE
+        );
+        MoveWindow(
+            TickButtonHwnd,
+            ContentLeft + (ButtonWidth + Gap) * 3,
             ContentTop,
             ButtonWidth,
             ScaledButtonHeight,
@@ -3139,6 +3214,7 @@ namespace Engine
             TransformEditsHwnd[8],
             ApplyObjectButtonHwnd,
             StartButtonHwnd,
+            PauseButtonHwnd,
             StopButtonHwnd,
             TickButtonHwnd,
             StatusLabelHwnd,
@@ -3660,6 +3736,7 @@ namespace Engine
         const HWND PlaybackControls[] =
         {
             StartButtonHwnd,
+            PauseButtonHwnd,
             StopButtonHwnd,
             TickButtonHwnd,
             StatusLabelHwnd,
@@ -3872,10 +3949,10 @@ namespace Engine
             TRUE
         );
 
-        const int PlaybackButtonWidth = ActionButtonWidth; //再生操作Button幅
+        const int PlaybackButtonWidth = std::max(1, (PageWidth - Gap * 3) / 4); //再生操作Button幅
         MoveWindow(StartButtonHwnd, PageLeft, PageTop, PlaybackButtonWidth, ActionButtonHeight, TRUE);
         MoveWindow(
-            StopButtonHwnd,
+            PauseButtonHwnd,
             PageLeft + PlaybackButtonWidth + Gap,
             PageTop,
             PlaybackButtonWidth,
@@ -3883,8 +3960,16 @@ namespace Engine
             TRUE
         );
         MoveWindow(
-            TickButtonHwnd,
+            StopButtonHwnd,
             PageLeft + (PlaybackButtonWidth + Gap) * 2,
+            PageTop,
+            PlaybackButtonWidth,
+            ActionButtonHeight,
+            TRUE
+        );
+        MoveWindow(
+            TickButtonHwnd,
+            PageLeft + (PlaybackButtonWidth + Gap) * 3,
             PageTop,
             PlaybackButtonWidth,
             ActionButtonHeight,
@@ -5800,11 +5885,114 @@ namespace Engine
             return;
         }
 
+        std::wstring Owner; //Member補完時の`.`又は`->`直前にある識別子
+
+        if (TokenBegin > 0)
+        {
+            const long ContextBegin = std::max(0L, TokenBegin - 96);
+            std::wstring Context(
+                static_cast<std::size_t>(TokenBegin - ContextBegin) + 1,
+                L'\0'
+            );
+            TEXTRANGEW Range{};
+            Range.chrg = CHARRANGE{ ContextBegin, TokenBegin };
+            Range.lpstrText = Context.data();
+            const LRESULT Length = SendMessageW(
+                ProgramEditorHwnd,
+                EM_GETTEXTRANGE,
+                0,
+                reinterpret_cast<LPARAM>(&Range)
+            );
+
+            if (Length > 0)
+            {
+                Context.resize(static_cast<std::size_t>(Length));
+                std::size_t End = Context.size();
+
+                while (End > 0 && std::iswspace(Context[End - 1]))
+                {
+                    --End;
+                }
+
+                if (End > 0 && Context[End - 1] == L'.')
+                {
+                    --End;
+                }
+                else if (End > 1 && Context[End - 2] == L'-' &&
+                    Context[End - 1] == L'>')
+                {
+                    End -= 2;
+                }
+                else
+                {
+                    End = 0;
+                }
+
+                std::size_t Begin = End;
+
+                while (Begin > 0 && (std::iswalnum(Context[Begin - 1]) ||
+                    Context[Begin - 1] == L'_'))
+                {
+                    --Begin;
+                }
+
+                if (Begin < End)
+                {
+                    Owner = Context.substr(Begin, End - Begin);
+                }
+            }
+        }
+
         std::unordered_set<std::wstring> CandidateSet; //重複を除いた全候補
 
-        for (const wchar_t* Word : ProgramCompletionWords)
+        const auto AddCandidates = [&CandidateSet](
+            std::initializer_list<const wchar_t*> candidates)
+            {
+                for (const wchar_t* Candidate : candidates)
+                {
+                    CandidateSet.emplace(Candidate);
+                }
+            };
+
+        if (Owner == L"AddObject")
         {
-            CandidateSet.emplace(Word);
+            AddCandidates({ L"Create", L"CreateCapsuleModel", L"CreateBox",
+                L"CreateSphere", L"CreatePlane", L"CreateCylinder", L"CreateMany",
+                L"CreateBoxes", L"CreateCapsules" });
+        }
+        else if (Owner == L"Object")
+        {
+            AddCandidates({ L"Find", L"FindAll", L"FindByType", L"FindByComponent",
+                L"FindByScript", L"Exists", L"SetSize", L"SetPosition",
+                L"SetTransform", L"Move", L"SetColor", L"MultiplyColor",
+                L"Remove", L"AttachScript" });
+        }
+        else if (Owner == L"Scene")
+        {
+            AddCandidates({ L"GetID", L"SetActive", L"SetView" });
+        }
+        else if (Owner == L"Input")
+        {
+            AddCandidates({ L"IsKeyDown" });
+        }
+        else if (Owner == L"Advanced")
+        {
+            AddCandidates({ L"Host", L"Program" });
+        }
+        else if (!Owner.empty())
+        {
+            AddCandidates({ L"GetID", L"GetSceneID", L"GetName", L"GetType",
+                L"IsValid", L"SetSize", L"SetPosition", L"SetTransform", L"Move",
+                L"SetColor", L"MultiplyColor", L"SetActive", L"GetComponent",
+                L"GetComponents", L"HasComponent", L"AttachScript", L"Remove" });
+        }
+
+        if (Owner.empty())
+        {
+            for (const wchar_t* Word : ProgramCompletionWords)
+            {
+                CandidateSet.emplace(Word);
+            }
         }
 
         if (forceDisplay)
@@ -5814,12 +6002,18 @@ namespace Engine
 
         for (const std::wstring& Word : ExternalProgramSuggestions)
         {
-            CandidateSet.emplace(Word);
+            if (Owner.empty())
+            {
+                CandidateSet.emplace(Word);
+            }
         }
 
         for (const ProgramFunctionInfo& Function : ProgramFunctions)
         {
-            CandidateSet.emplace(Function.Name);
+            if (Owner.empty())
+            {
+                CandidateSet.emplace(Function.Name);
+            }
         }
 
         ProgramSuggestions.clear();
@@ -6323,6 +6517,7 @@ namespace Engine
             TransformEditsHwnd[8],
             ApplyObjectButtonHwnd,
             StartButtonHwnd,
+            PauseButtonHwnd,
             StopButtonHwnd,
             TickButtonHwnd,
             StatusLabelHwnd,
@@ -6392,26 +6587,39 @@ namespace Engine
     // 再生状態に合わせてボタンと状態テキストを更新する
     void WinApp::UpdatePlaybackControls()
     {
+        const bool Playing = CurrentPlaybackState == PlaybackState::Playing;
+        const bool Stopped = CurrentPlaybackState == PlaybackState::Stopped;
+
         if (StartButtonHwnd != nullptr)
         {
-            EnableWindow(StartButtonHwnd, IsPlaying ? FALSE : TRUE);
+            SetWindowTextW(StartButtonHwnd, CurrentPlaybackState == PlaybackState::Paused
+                ? L"Resume"
+                : L"Start");
+            EnableWindow(StartButtonHwnd, Playing ? FALSE : TRUE);
+        }
+
+        if (PauseButtonHwnd != nullptr)
+        {
+            EnableWindow(PauseButtonHwnd, Playing ? TRUE : FALSE);
         }
 
         if (StopButtonHwnd != nullptr)
         {
-            EnableWindow(StopButtonHwnd, IsPlaying ? TRUE : FALSE);
+            EnableWindow(StopButtonHwnd, Stopped ? FALSE : TRUE);
         }
 
         if (TickButtonHwnd != nullptr)
         {
-            EnableWindow(TickButtonHwnd, IsPlaying ? FALSE : TRUE);
+            EnableWindow(TickButtonHwnd, Playing ? FALSE : TRUE);
         }
 
         if (StatusLabelHwnd != nullptr)
         {
             SetWindowTextW(
                 StatusLabelHwnd,
-                IsPlaying ? L"状態: 再生中" : L"状態: 停止中"
+                Playing
+                    ? L"状態: 再生中"
+                    : (Stopped ? L"状態: 停止（初期状態）" : L"状態: 一時停止")
             );
         }
     }

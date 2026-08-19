@@ -140,6 +140,87 @@ namespace Engine
         return RegisterScene(std::move(NewScene), ResolvedName);
     }
 
+    //全Scene定義と管理状態をGPU Resourceなしの独立Snapshotへ複製する
+    std::unique_ptr<SceneManager> SceneManager::CloneDefinition() const
+    {
+        auto Result = std::make_unique<SceneManager>(); //再生開始時点の復元用Manager
+        std::unordered_map<SceneID, SceneID> IDRemap; //削除済みSlotを除く新旧Scene ID対応
+        IDRemap.reserve(SceneCount);
+
+        for (SceneID SourceID : GetSceneIDs())
+        {
+            const Scene* Source = FindScene(SourceID); //複製するScene
+            std::unique_ptr<Scene> Definition = Source == nullptr
+                ? nullptr
+                : Source->CloneDefinition();
+
+            if (!Source || !Definition)
+            {
+                return nullptr;
+            }
+
+            const SceneID NewID = Result->RegisterScene(
+                std::move(Definition),
+                Source->GetName()
+            );
+
+            if (!NewID.IsValid())
+            {
+                return nullptr;
+            }
+
+            IDRemap.emplace(SourceID, NewID);
+        }
+
+        for (SceneID SourceID : ActiveSceneIDs)
+        {
+            const auto Found = IDRemap.find(SourceID);
+
+            if (Found == IDRemap.end())
+            {
+                return nullptr;
+            }
+
+            Result->ActiveIndexByID.emplace(
+                Found->second,
+                Result->ActiveSceneIDs.size()
+            );
+            Result->ActiveSceneIDs.emplace_back(Found->second);
+        }
+
+        const auto MainFound = IDRemap.find(MainSceneID);
+        const auto ViewFound = IDRemap.find(ViewSceneID);
+        Result->MainSceneID = MainFound == IDRemap.end() ? SceneID() : MainFound->second;
+        Result->ViewSceneID = ViewFound == IDRemap.end() ? SceneID() : ViewFound->second;
+        Result->SceneSuffixByName = SceneSuffixByName;
+        return Result;
+    }
+
+    //現在Sceneを逆順終了し、Snapshotを初期化して稼働状態へ戻す
+    bool SceneManager::RestoreDefinition(
+        std::unique_ptr<SceneManager> definition,
+        DirectX12& dx12
+    )
+    {
+        if (!definition)
+        {
+            return false;
+        }
+
+        SwapState(*definition); //thisへ未初期化Snapshot、definitionへ再生中状態を移す
+        definition->Finalize(); //再生中Scriptと描画Resourceを先に終了する
+
+        if (!ActivateDefinitions(dx12))
+        {
+            MessageLog::GetInstance().AddPermanentLog(
+                "[Critical] SceneManager | Playback snapshot activation failed."
+            );
+            return false;
+        }
+
+        return true;
+    }
+
     // Sceneを終了してID Slotを再利用しないTombstoneへ変更する
     // sceneID: 削除対象SceneID
     // 戻り値: 削除に成功した場合はtrue、Sceneが存在しない場合はfalse
@@ -546,6 +627,35 @@ namespace Engine
         MainSceneID = SceneID();
         ViewSceneID = SceneID();
         SceneCount = 0;
+    }
+
+    //Definition Snapshot内の全Componentと描画Resourceを登録順に開始する
+    bool SceneManager::ActivateDefinitions(DirectX12& dx12)
+    {
+        for (std::unique_ptr<Scene>& OwnedScene : ScenesByID)
+        {
+            if (OwnedScene && !OwnedScene->ActivateClonedDefinition(dx12))
+            {
+                Finalize();
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    //二つのManagerが所有する全Scene管理状態を例外なしで交換する
+    void SceneManager::SwapState(SceneManager& other) noexcept
+    {
+        using std::swap;
+        swap(ScenesByID, other.ScenesByID);
+        swap(SceneIDByName, other.SceneIDByName);
+        swap(SceneSuffixByName, other.SceneSuffixByName);
+        swap(ActiveSceneIDs, other.ActiveSceneIDs);
+        swap(ActiveIndexByID, other.ActiveIndexByID);
+        swap(MainSceneID, other.MainSceneID);
+        swap(ViewSceneID, other.ViewSceneID);
+        swap(SceneCount, other.SceneCount);
     }
 
     // 所有権を受け取ったSceneを初期化してManagerへ登録する

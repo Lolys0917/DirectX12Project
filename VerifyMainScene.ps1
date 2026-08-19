@@ -309,7 +309,7 @@ try
                 $MainCompileDetected = $true
             }
 
-            if ($Text.ToString() -match "MainOscillatingCapsule created")
+            if ($Text.ToString() -match "Object handles and stress-test array initialized")
             {
                 $CapsuleCreated = $true
             }
@@ -473,7 +473,7 @@ try
         $CombinedMessages -notmatch "SceneManager \| MainScene changed" -or
         $CombinedMessages -notmatch "GameApp \| SceneManager initialized the active MainScene" -or
         $CombinedMessages -notmatch "MainProgram \| Main extension compiled" -or
-        $CombinedMessages -notmatch "MainOscillatingCapsule created" -or
+        $CombinedMessages -notmatch "Object handles and stress-test array initialized" -or
         $CombinedMessages -notmatch "ScriptProgram \| External Script module compiled" -or
         $CombinedMessages -notmatch "ScriptModule \| External Script module hot reloaded")
     {

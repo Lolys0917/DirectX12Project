@@ -35,8 +35,16 @@ namespace Engine
     void Plane::SetSize(float width, float depth)
     {
         constexpr float MinimumSize = 0.0001f; //ゼロ面を防ぐ最小寸法
-        Width = (std::max)(width, MinimumSize);
-        Depth = (std::max)(depth, MinimumSize);
+        const float NewWidth = (std::max)(width, MinimumSize);
+        const float NewDepth = (std::max)(depth, MinimumSize);
+
+        if (Width == NewWidth && Depth == NewDepth)
+        {
+            return;
+        }
+
+        Width = NewWidth;
+        Depth = NewDepth;
         BuildMesh();
     }
 

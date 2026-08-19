@@ -1,6 +1,6 @@
 # DirectX 12 エンジン基盤仕様
 
-更新日: 2026-08-19
+更新日: 2026-08-20
 
 ## 1. 設計方針
 
@@ -16,7 +16,7 @@
 - Component の寿命は所有 Object の寿命を超えない。
 - Object と Component の登録、ID 付与、検索、削除は Scene ごとの `ObjectManager` だけが行う。
 
-PrimitiveObject は ObjectManager の描画ライフサイクルへ統合し、VertexMesh の共通 Vertex Color Pipeline で描画する。MeshComponent と Polygon も同じ Pipeline を使用し、所有 Object のワールド行列を適用する。CPU Mesh の変更後は次の Draw 時に GPU Buffer を遅延再生成する。
+PrimitiveObject は ObjectManager の描画ライフサイクルへ統合し、VertexMesh の共通 Vertex Color Pipeline で描画する。MeshComponent と Polygon も同じ Pipeline を使用し、所有 Object のワールド行列を適用する。同一DeviceのRoot SignatureとPipeline Stateは共有する。色はDraw単位のRoot Constantsで上書きし、寸法又は分割数が変わった場合だけCPU MeshとGPU Bufferを遅延再生成する。
 
 従来の `Transform` 構造体は、Object 以外から使用されず、Component 側の座標とも責務が重複していたため削除する。必要な Position、Rotation、Scale とワールド行列生成は Object が直接保持する。Collider の Center などは所有 Object からのローカルオフセットとして各 Component が保持する。
 
@@ -51,6 +51,8 @@ Component は `OwnerObjectID × ComponentType × ResolvedName = ComponentID` で
 
 - ID 検索: ID を安定 vector slot として使用するため厳密に O(1)。
 - Name検索: Sceneごとの`unordered_map`を使用し、リスト走査なし、平均 O(1)。Type × Name検索も名前解決後に型を検証する。文字列長とハッシュ衝突を含む最悪計算量は O(n) になり得る。
+- Handle情報取得: `SceneID + ObjectID`又は`SceneID + ComponentID`から安定Slotを直接参照しO(1)。外部DLLには生Pointerではなく非所有Handleを公開する。
+- 部分名／型／Attach済みComponent検索: 結果集合を作る操作なので有効Objectを走査しO(n)。取得後のHandle操作はID直接参照へ戻る。
 - Update と Draw: 有効な要素を処理するため O(n)。Find の要件とは別である。
 
 検索 API は見つからない場合に例外で暗黙挿入せず、`nullptr` または無効な ID を返す。
@@ -66,6 +68,8 @@ Component は `OwnerObjectID × ComponentType × ResolvedName = ComponentID` で
 7. Scene 破棄時は GPU 使用完了後に Component、Object、ObjectManager の順で破棄する。
 
 Script Componentは `OnAttach`、`OnStart`、`OnUpdate`、`OnStop`、`OnDetach` の順序を保証する。Object又はScriptが非Activeの場合は `OnUpdate` を呼ばない。実行中に追加したScriptは `Scene::InitializePendingComponents` により次の更新前に初期化する。
+
+Main ProgramはConstructor／Destructorではなく`Init`、`Update`、`End`を高水準Lifecycleとする。順序依存の参照解除が必要なSceneは任意の`StartDestroy`と`EndDestroy`を持てる。全Sceneの`StartDestroy`を登録順、`End`を逆登録順、`EndDestroy`を逆登録順で実行する。
 
 派生Componentの終了処理は固有GPU Resource又はDLL Instanceを解放した後に `Component::Finalize` を呼ぶ。Renderable ObjectはActive状態に関係なく登録時にGPU Resourceを初期化する。これにより、非Active状態で複製したObjectを後からActiveにしても未初期化Resourceを描画しない。
 
@@ -130,11 +134,11 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 - 中央: ドラッグ可能な splitter。左右の最小幅を守って配置を変更する。
 - 右: Engine、再生、ログ、メイン、スクリプトのTabを持つ操作パネル。
 - Engine Tab: Scene→Object→Component／ScriptのTree、Object追加、Script差込、DLL読込ボタン。
-- 再生Tab: `UIDemo.png`、Start、Stop、Tick、FPS Edit、FPS Trackbar。
+- 再生Tab: `UIDemo.png`、Start／Resume、Pause、Stop、Tick、FPS Edit、FPS Trackbar。
 - ログTab: ログ一覧、一括消去ボタン。
 - メインTab: `Programs/` のC++を編集し、各フレームでScene／Object／Sub Scriptより先に実行する全体制御DLLを生成する。
 - スクリプトTab: `ScriptPrograms/` のC++を編集し、Objectへ差し込むUnityのScript相当のDLLを生成する。
-- 右操作領域は、上段を Start / Stop / Tick と状態表示、中央を UIDemo と FPS 設定、下段をメッセージログとして配置する。
+- 右操作領域は、上段を Start / Pause / Stop / Tick と状態表示、中央を UIDemo と FPS 設定、下段をメッセージログとして配置する。
 - 右パネルの範囲管理用Windowは描画せず、機能コントロールを親Editor Window上の前面へ明示的に固定して背景に隠れないようにする。
 - 初期分割比は左 68% / 右 32%、左描画領域の最小幅は 320 論理 px、右操作パネルの最小幅は 380 論理 px とする。
 - 右操作パネルは 18 論理 px の外周余白、8 論理 px のコントロール間隔、16 論理 px のセクション間隔をDPIへ換算して使用する。
@@ -143,8 +147,10 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 - PNG 読み込み: Windows Imaging Component を使用する。
 - FPS 範囲: 1～240、初期値 60。
 - Start: Active Scene の連続 Update を開始する。
-- Stop: Update を停止し、最後の描画結果を保持する。
-- Tick: Stop 中に `1 / TargetFPS` 秒だけ 1 回 Update する。
+- Pause: Scene、Object、Main Program状態を保持したままUpdateを一時停止する。StartはResume表示となり続きから再開する。
+- Stop: Updateを停止し、Scene定義を再生開始直前へ戻してMain Programを再生成する。
+- Tick: Stop又はPause中に`1 / TargetFPS`秒だけ1回Updateする。Stop直後のTickは先に復元状態をSnapshot化する。
+- Keyboard入力は描画ViewportがFocusを持つ場合だけ有効とする。Viewportクリック時はEditor／TabからFocusを移す。
 - Edit と Trackbar の値は常に同期し、範囲外値はクランプする。
 - Tree空白又はSceneの右クリックはObject追加、DLL読込、更新を提供する。
 - Objectの右クリックはScript差込、複製、名前変更、有効切替、削除を提供する。
@@ -200,3 +206,16 @@ Subプログラムは `Script` 派生Componentであり、EditorのEngine Tabか
 取得した関数PointerはModuleを解放すると無効になるため、`ScriptModuleManager` はModuleごとのHandle、関数表、Registry Keyを保持する。既存Script Componentは共有所有権でModule寿命を延長し、最後の利用者が破棄されるまで `FreeLibrary` しない。
 
 DLL境界ではC++ Classや標準Libraryの所有権を直接渡さない。`Create` で生成した不透明Instanceは同じDLLの `Destroy` で破棄し、Object操作はVersionとSizeを持つC ABIの `EngineScriptHostAPI` 関数表を通す。詳細と実装例は `SCRIPT_SYSTEM.md` 及び `Samples/RotationScriptModule` を参照する。
+
+## 13. コンパイル時Feature要求
+
+高水準APIの利用に応じた基礎機能追加は、Source文字列検索ではなくModule DescriptorのFeature Manifestとして扱う。各Featureは安定`FeatureID`、必要Component型、保存Layout版、更新関数、Editor公開Propertyを定義する。
+
+- Main／Sub ProgramのBuild時に、利用した高水準WrapperがFeature要求をManifestへ出力する。
+- ScriptをObjectへAttachするとき、EngineはScriptのFeature要求を統合し、未登録の基礎Componentと専用Storageだけを追加する。
+- 同じFeatureを複数Scriptが要求してもObject上では共有し、最後の要求元が外れた場合だけ削除候補にする。
+- 頻繁に更新するFeatureは型別Dense Storage、任意機能はSparse Storageを選択できる。外部HandleはStorage移動後も安定IDから解決する。
+- 値にはDirty bit又はRevisionを持たせ、変更されていないCPU／GPU Dataは更新しない。
+- 自動追加されたComponentもObject Treeへ表示し、Manifestで公開した数値をInspectorから編集できる。
+
+第一段階として、本版は安定Handle、ID直接参照、型／Attach状態検索、同値設定の省略、描画色定数化を実装した。Feature Manifest生成とStorage自動選択は、Component Descriptor ABIを定めた後に実装する。

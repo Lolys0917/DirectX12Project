@@ -142,6 +142,15 @@ namespace Engine
             const std::string& name
         );
 
+        //全SceneのCPU定義とActive/Main/View関係を再生復元用に複製する
+        std::unique_ptr<SceneManager> CloneDefinition() const;
+
+        //現在状態を終了し、複製定義をComponent初期化後の稼働状態へ置き換える
+        bool RestoreDefinition(
+            std::unique_ptr<SceneManager> definition,
+            DirectX12& dx12
+        );
+
         // Sceneを終了してID Slotを再利用しないTombstoneへ変更する
         // sceneID: 削除対象SceneID
         // 戻り値: 削除に成功した場合はtrue、Sceneが存在しない場合はfalse
@@ -273,6 +282,9 @@ namespace Engine
             std::unique_ptr<Scene> scene,
             const std::string& resolvedName
         );
+
+        bool ActivateDefinitions(DirectX12& dx12);
+        void SwapState(SceneManager& other) noexcept;
 
     private:
         std::vector<std::unique_ptr<Scene>> ScenesByID; // SceneIDを直接Indexにする安定Slot

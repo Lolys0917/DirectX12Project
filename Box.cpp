@@ -36,9 +36,18 @@ namespace Engine
     void Box::SetSize(float width, float height, float depth)
     {
         constexpr float MinimumSize = 0.0001f; //ゼロ面を防ぐ最小寸法
-        Width = (std::max)(width, MinimumSize);
-        Height = (std::max)(height, MinimumSize);
-        Depth = (std::max)(depth, MinimumSize);
+        const float NewWidth = (std::max)(width, MinimumSize);
+        const float NewHeight = (std::max)(height, MinimumSize);
+        const float NewDepth = (std::max)(depth, MinimumSize);
+
+        if (Width == NewWidth && Height == NewHeight && Depth == NewDepth)
+        {
+            return;
+        }
+
+        Width = NewWidth;
+        Height = NewHeight;
+        Depth = NewDepth;
         BuildMesh();
     }
 

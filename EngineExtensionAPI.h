@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_20  v1.20  Object／ComponentのID直接情報取得APIを末尾追加
 //||  2026_08_19  v1.10  名前指定Capsule生成とID／名前指定寸法APIを末尾追加
 //||  2026_08_18  v1.00  新規作成
 //||
@@ -36,6 +37,23 @@ enum class EngineExternalObjectType : std::uint32_t
     HalfSphere,
     Capsule,
     SkyBox
+};
+
+enum class EngineExternalComponentType : std::uint32_t
+{
+    Component,
+    Mesh,
+    Polygon,
+    Model,
+    Camera,
+    Grid,
+    Collider,
+    BoxCollider,
+    SphereCollider,
+    CapsuleCollider,
+    CylinderCollider,
+    PlaneCollider,
+    Script
 };
 
 struct EngineExternalVector3 final
@@ -175,6 +193,10 @@ struct EngineHostAPI final
     std::uint32_t (ENGINE_EXTENSION_CALL* CreateCapsuleModel)(void* context, std::uint32_t sceneID, const char* name, std::uint32_t parentObjectID);
     bool (ENGINE_EXTENSION_CALL* SetObjectSize)(void* context, std::uint32_t sceneID, std::uint32_t objectID, const EngineExternalVector3* size);
     bool (ENGINE_EXTENSION_CALL* SetObjectSizeByName)(void* context, std::uint32_t sceneID, const char* name, const EngineExternalVector3* size);
+
+    //v1.20以降の追記専用API。安定ID Handleから一覧走査なしで情報を取得する。
+    bool (ENGINE_EXTENSION_CALL* GetObjectInfoByID)(void* context, std::uint32_t sceneID, std::uint32_t objectID, EngineExternalObjectInfo* information);
+    bool (ENGINE_EXTENSION_CALL* GetComponentInfoByID)(void* context, std::uint32_t sceneID, std::uint32_t componentID, EngineExternalComponentInfo* information);
 };
 
 struct EngineExtensionModuleDescriptor final

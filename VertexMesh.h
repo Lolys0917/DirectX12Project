@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_20  v2.20  描画色Root Constantsと共通Pipeline共有を追加
 //||  2026_08_19  v2.10  GPU Resource準備状態の読取APIを追加
 //||  2026_07_13  v2.00  共通Color MeshのGPU BufferとPipeline描画を実装
 //||  2026_07_13  v1.10  命名と宣言コメントを規則へ統一
@@ -40,6 +41,10 @@ namespace Engine
 
         void SetVertices(const std::vector<Vertex>& vertices);
         void SetIndices(const std::vector<uint32_t>& indices);
+
+        //頂点Bufferを変更せず、このMeshの描画色をRoot Constantsで上書きする
+        //引数: color 新しいRGBA描画色
+        void SetVertexColor(const DirectX::XMFLOAT4& color);
 
         //頂点をCPU Mesh末尾へ追加する
         //引数: vertex 追加する頂点
@@ -107,6 +112,8 @@ namespace Engine
         D3D12_INDEX_BUFFER_VIEW IndexBufferView; //Index Buffer View
         Microsoft::WRL::ComPtr<ID3D12RootSignature> RootSignature; //WVP Root Constants用RootSignature
         Microsoft::WRL::ComPtr<ID3D12PipelineState> PipelineState; //共通Vertex Color描画Pipeline
+        DirectX::XMFLOAT4 ColorOverride; //頂点色の代わりに描画へ渡すRGBA色
+        bool UseColorOverride; //ColorOverrideを使用する場合true
         bool GPUResourceReady; //全GPU Resourceが描画可能な場合true
         bool GPUResourceDirty; //CPU Mesh変更後にGPU再作成が必要な場合true
     };

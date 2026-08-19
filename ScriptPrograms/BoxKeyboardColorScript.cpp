@@ -45,6 +45,8 @@ namespace
             Float3 Next = Origin; //基準位置から求める今回の座標
             Next.x += std::sin(ElapsedTime * 2.0f) * 2.0f;
             this->Position = Next;
+
+            AddObject.CreateCapsuleModel("MainOscillatingCapsule");
         }
 
     private:
@@ -59,22 +61,4 @@ namespace
             "Box Horizontal Oscillation"
         )
     };
-}
-
-//概要：EngineへAttach前提のBox往復Sub Script関数表を公開する
-//引数：requestedAbiVersion=Engineが要求するScript ABI版番号
-//戻り値：互換Module定義、版不一致時はnullptr
-ENGINE_SCRIPT_EXPORT const EngineScriptModuleDescriptor* ENGINE_SCRIPT_CALL EngineGetScriptModule(
-    std::uint32_t requestedAbiVersion
-)
-{
-    static const EngineScriptModuleDescriptor Module
-    {
-        sizeof(EngineScriptModuleDescriptor),
-        EngineScriptAbiVersion,
-        "EditorScriptPrograms",
-        static_cast<std::uint32_t>(sizeof(Scripts) / sizeof(Scripts[0])),
-        Scripts
-    };
-    return requestedAbiVersion == EngineScriptAbiVersion ? &Module : nullptr;
 }

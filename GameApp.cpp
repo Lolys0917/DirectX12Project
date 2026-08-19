@@ -18,6 +18,7 @@
 #include "GameApp.h"
 
 #include "DirectX12.h"
+#include "GameInput.h"
 #include "MainScene.h"
 #include "MessageLog.h"
 #include "RenderTexture.h"
@@ -28,6 +29,8 @@ namespace Engine
     GameApp::GameApp()
         : Graphics()
         , Scenes()
+        , PlaybackSnapshot()
+        , RenderWindow(nullptr)
         , Initialized(false)
     {
     }
@@ -70,6 +73,9 @@ namespace Engine
             return false;
         }
 
+        RenderWindow = hwnd;
+        GameInput::SetInputWindow(RenderWindow);
+
         DirectX12& GraphicsDevice =
             Graphics.GetDirectX12(); // SceneとComponentが共有する描画基盤
         const SceneID MainSceneID = Scenes.CreateMainScene<MainScene>(
@@ -101,6 +107,9 @@ namespace Engine
     // Scene GPU Resourceを解放してからDirectX 12描画基盤を終了する
     void GameApp::Finalize()
     {
+        GameInput::ClearInputWindow(RenderWindow);
+        RenderWindow = nullptr;
+        PlaybackSnapshot.reset();
         Scenes.Finalize();
         Graphics.Finalize();
         Initialized = false;
@@ -198,6 +207,45 @@ namespace Engine
             "[Info] GameApp | Render viewport resources were resized."
         );
         return true;
+    }
+
+    //最初の再生又はTick直前にGPUを複製せずScene定義だけを保存する
+    bool GameApp::CapturePlaybackState()
+    {
+        if (!Initialized)
+        {
+            return false;
+        }
+
+        if (PlaybackSnapshot)
+        {
+            return true;
+        }
+
+        PlaybackSnapshot = Scenes.CloneDefinition();
+        return PlaybackSnapshot != nullptr;
+    }
+
+    //再生中Sceneを終了し、保存した定義を現在の描画寸法で再初期化する
+    bool GameApp::RestorePlaybackState()
+    {
+        if (!Initialized || !PlaybackSnapshot)
+        {
+            return false;
+        }
+
+        DirectX12& GraphicsDevice = Graphics.GetDirectX12(); //復元Component用描画基盤
+
+        if (!Scenes.RestoreDefinition(std::move(PlaybackSnapshot), GraphicsDevice))
+        {
+            return false;
+        }
+
+        return Scenes.ResizeActiveScenes(
+            GraphicsDevice,
+            GraphicsDevice.GetWidth(),
+            GraphicsDevice.GetHeight()
+        );
     }
 
     // Applicationが所有するSceneManagerを取得する

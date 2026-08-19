@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_20  v1.20  安定IDからObject／Component情報を直接取得するABIを追加
 //||  2026_08_19  v1.10  名前指定Capsule生成、寸法設定、DLL診断を追加
 //||  2026_08_18  v1.00  新規作成
 //||
@@ -230,13 +231,13 @@ namespace Engine
             );
         }
 
-        //概要：登録順IndexからObject情報とLocal Transformを読み取る
-        //引数：context=Engine Context、sceneID=対象Scene、index=Object Index、information=結果格納先
+        //概要：安定IDからObject情報とLocal Transformを直接読み取る
+        //引数：context=Engine Context、sceneID=対象Scene、objectID=対象Object、information=結果格納先
         //戻り値：情報を取得できた場合はtrue
-        bool ENGINE_EXTENSION_CALL GetExternalObjectInfo(
+        bool ENGINE_EXTENSION_CALL GetExternalObjectInfoByID(
             void* context,
             std::uint32_t sceneID,
-            std::uint32_t index,
+            std::uint32_t objectID,
             EngineExternalObjectInfo* information
         )
         {
@@ -247,16 +248,13 @@ namespace Engine
 
             EngineAPI& API = GetEngine(context); //読取元Engine API
             const SceneID NativeSceneID(sceneID); //強いScene ID
-            const std::vector<ObjectID> IDs = API.GetObjectIDs(NativeSceneID); //登録順Object ID
-
-            if (index >= IDs.size())
-            {
-                return false;
-            }
-
             EditorObjectInfo NativeInformation; //Native側Object情報
 
-            if (!API.TryGetObjectInfo(NativeSceneID, IDs[index], NativeInformation))
+            if (!API.TryGetObjectInfo(
+                NativeSceneID,
+                ObjectID(objectID),
+                NativeInformation
+            ))
             {
                 return false;
             }
@@ -264,7 +262,7 @@ namespace Engine
             *information = EngineExternalObjectInfo{};
             information->Size = sizeof(EngineExternalObjectInfo);
             information->SceneID = sceneID;
-            information->ObjectID = IDs[index].GetValue();
+            information->ObjectID = objectID;
             information->ParentObjectID = NativeInformation.ParentID.GetValue();
             information->ObjectType = static_cast<std::uint32_t>(NativeInformation.Type);
             information->ComponentCount = static_cast<std::uint32_t>(NativeInformation.Components.size());
@@ -286,6 +284,26 @@ namespace Engine
                 NativeInformation.LocalTransform.Scale.Z
             };
             return true;
+        }
+
+        //概要：登録順IndexからObject情報とLocal Transformを読み取る
+        //引数：context=Engine Context、sceneID=対象Scene、index=Object Index、information=結果格納先
+        //戻り値：情報を取得できた場合はtrue
+        bool ENGINE_EXTENSION_CALL GetExternalObjectInfo(
+            void* context,
+            std::uint32_t sceneID,
+            std::uint32_t index,
+            EngineExternalObjectInfo* information
+        )
+        {
+            EngineAPI& API = GetEngine(context); //読取元Engine API
+            const std::vector<ObjectID> IDs = API.GetObjectIDs(SceneID(sceneID)); //登録順Object ID
+            return index < IDs.size() && GetExternalObjectInfoByID(
+                context,
+                sceneID,
+                IDs[index].GetValue(),
+                information
+            );
         }
 
         //概要：外部Programから具象Objectを作成して新しいIDを取得する
@@ -431,6 +449,57 @@ namespace Engine
             ).size());
         }
 
+        //概要：安定IDからComponent情報と所有Objectを直接読み取る
+        //引数：context=Engine Context、sceneID=対象Scene、componentID=対象Component、information=結果格納先
+        //戻り値：情報を取得できた場合はtrue
+        bool ENGINE_EXTENSION_CALL GetExternalComponentInfoByID(
+            void* context,
+            std::uint32_t sceneID,
+            std::uint32_t componentID,
+            EngineExternalComponentInfo* information
+        )
+        {
+            if (information == nullptr)
+            {
+                return false;
+            }
+
+            EngineAPI& API = GetEngine(context); //読取元Engine API
+            const SceneID NativeSceneID(sceneID); //強いScene ID
+            EditorComponentInfo NativeInformation; //Native側Component情報
+
+            if (!API.TryGetComponentInfo(
+                NativeSceneID,
+                ComponentID(componentID),
+                NativeInformation
+            ))
+            {
+                return false;
+            }
+
+            const Scene* TargetScene = API.GetSceneManager().FindScene(NativeSceneID); //所有Scene
+            const Component* TargetComponent = TargetScene == nullptr
+                ? nullptr
+                : TargetScene->GetObjectManager().FindComponent(
+                    ComponentID(componentID)
+                ); //型と所有者を読むComponent
+
+            if (TargetComponent == nullptr || TargetComponent->GetOwner() == nullptr)
+            {
+                return false;
+            }
+
+            *information = EngineExternalComponentInfo{};
+            information->Size = sizeof(EngineExternalComponentInfo);
+            information->SceneID = sceneID;
+            information->ObjectID = TargetComponent->GetOwner()->GetID().GetValue();
+            information->ComponentID = componentID;
+            information->ComponentType = static_cast<std::uint32_t>(TargetComponent->GetType());
+            information->Active = NativeInformation.Active;
+            CopyExternalName(information->Name, std::size(information->Name), NativeInformation.Name);
+            return true;
+        }
+
         //概要：Object内登録順IndexからComponent情報を読み取る
         //引数：context=Engine Context、sceneID=対象Scene、objectID=所有Object、index=Component Index、information=結果格納先
         //戻り値：情報を取得できた場合はtrue
@@ -442,49 +511,17 @@ namespace Engine
             EngineExternalComponentInfo* information
         )
         {
-            if (information == nullptr)
-            {
-                return false;
-            }
-
             EngineAPI& API = GetEngine(context); //読取元Engine API
-            const SceneID NativeSceneID(sceneID); //強いScene ID
             const std::vector<ComponentID> IDs = API.GetComponentIDs(
-                NativeSceneID,
+                SceneID(sceneID),
                 ObjectID(objectID)
             ); //Object内登録順Component ID
-
-            if (index >= IDs.size())
-            {
-                return false;
-            }
-
-            EditorComponentInfo NativeInformation; //Native側Component情報
-
-            if (!API.TryGetComponentInfo(NativeSceneID, IDs[index], NativeInformation))
-            {
-                return false;
-            }
-
-            const Scene* TargetScene = API.GetSceneManager().FindScene(NativeSceneID); //所有Scene
-            const Component* TargetComponent = TargetScene == nullptr
-                ? nullptr
-                : TargetScene->GetObjectManager().FindComponent(IDs[index]); //型を読むComponent
-
-            if (TargetComponent == nullptr)
-            {
-                return false;
-            }
-
-            *information = EngineExternalComponentInfo{};
-            information->Size = sizeof(EngineExternalComponentInfo);
-            information->SceneID = sceneID;
-            information->ObjectID = objectID;
-            information->ComponentID = IDs[index].GetValue();
-            information->ComponentType = static_cast<std::uint32_t>(TargetComponent->GetType());
-            information->Active = NativeInformation.Active;
-            CopyExternalName(information->Name, std::size(information->Name), NativeInformation.Name);
-            return true;
+            return index < IDs.size() && GetExternalComponentInfoByID(
+                context,
+                sceneID,
+                IDs[index].GetValue(),
+                information
+            );
         }
 
         //概要：外部Programから指定Componentを削除する
@@ -1086,6 +1123,8 @@ namespace Engine
         Host.CreateCapsuleModel = CreateExternalCapsuleModel;
         Host.SetObjectSize = SetExternalObjectSize;
         Host.SetObjectSizeByName = SetExternalObjectSizeByName;
+        Host.GetObjectInfoByID = GetExternalObjectInfoByID;
+        Host.GetComponentInfoByID = GetExternalComponentInfoByID;
     }
 
     //概要：稼働中の外部Program Instanceを破棄してDLLを解放する
@@ -1205,6 +1244,41 @@ namespace Engine
     void ExtensionModuleManager::Unload()
     {
         ReleaseModule(ActiveModule);
+    }
+
+    //DLLを保持したままMain ProgramのEndと破棄処理だけを実行する
+    void ExtensionModuleManager::DestroyInstance()
+    {
+        if (ActiveModule.Instance != nullptr && ActiveModule.Descriptor != nullptr &&
+            ActiveModule.Descriptor->Destroy != nullptr)
+        {
+            ActiveModule.Descriptor->Destroy(ActiveModule.Instance);
+        }
+
+        ActiveModule.Instance = nullptr;
+        DeltaTime = 0.0f;
+    }
+
+    //保持中DLLからMain Program Instanceを作り直してInitを実行する
+    bool ExtensionModuleManager::CreateInstance()
+    {
+        if (ActiveModule.Handle == nullptr || ActiveModule.Descriptor == nullptr)
+        {
+            return true;
+        }
+
+        if (ActiveModule.Instance != nullptr)
+        {
+            return true;
+        }
+
+        if (ActiveModule.Descriptor->Create == nullptr)
+        {
+            return false;
+        }
+
+        ActiveModule.Instance = ActiveModule.Descriptor->Create(&Host);
+        return ActiveModule.Instance != nullptr;
     }
 
     //概要：稼働中Moduleの毎Frame処理をNative固定更新上で実行する

@@ -159,6 +159,18 @@ namespace Engine
     // 戻り値: 初期化済み複製Scene、失敗した場合はnullptr
     std::unique_ptr<Scene> Scene::Clone(DirectX12& dx12) const
     {
+        return CloneInternal(&dx12);
+    }
+
+    //GPU ResourceとLifecycleを開始せず、現在のScene定義だけを複製する
+    std::unique_ptr<Scene> Scene::CloneDefinition() const
+    {
+        return CloneInternal(nullptr);
+    }
+
+    //共通のScene定義複製を行い、描画基盤指定時だけComponentを初期化する
+    std::unique_ptr<Scene> Scene::CloneInternal(DirectX12* dx12) const
+    {
         if (!Objects || !Initialized)
         {
             MessageLog::GetInstance().AddLog(
@@ -249,8 +261,8 @@ namespace Engine
         ClonedScene->DebugGridObjectID = ClonedDebugGridObject->GetID();
         ClonedScene->PrimaryCameraID = ClonedPrimaryCamera->GetID();
 
-        if (!ClonedScene->Objects->InitializeComponents(dx12) ||
-            ClonedScene->GetPrimaryCamera() == nullptr)
+        if (dx12 != nullptr && (!ClonedScene->Objects->InitializeComponents(*dx12) ||
+            ClonedScene->GetPrimaryCamera() == nullptr))
         {
             MessageLog::GetInstance().AddLog(
                 "[Error] Scene | Cloned Component GPU initialization failed."
@@ -258,8 +270,27 @@ namespace Engine
             return nullptr;
         }
 
-        ClonedScene->Initialized = true;
+        ClonedScene->Initialized = dx12 != nullptr;
         return ClonedScene;
+    }
+
+    //定義複製済みSceneのComponent LifecycleとGPU Resourceを開始する
+    bool Scene::ActivateClonedDefinition(DirectX12& dx12)
+    {
+        if (Initialized)
+        {
+            return true;
+        }
+
+        if (!Objects || Width == 0 || Height == 0 ||
+            !Objects->InitializeComponents(dx12) || GetPrimaryCamera() == nullptr)
+        {
+            Objects->FinalizeComponents();
+            return false;
+        }
+
+        Initialized = true;
+        return true;
     }
 
     // 派生Scene固有のObjectとComponentを必須Camera、Gridへ追加する

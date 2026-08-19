@@ -122,6 +122,8 @@ namespace Engine
             const std::string& scriptKey
         );
         void UpdateExtensions(float deltaTime);
+        bool CapturePlaybackState();
+        bool RestorePlaybackState();
         bool ExecuteEditorCommand(const EditorCommand& command);
         EditorSnapshot CreateEditorSnapshot() const;
         std::uint64_t GetRevision() const;

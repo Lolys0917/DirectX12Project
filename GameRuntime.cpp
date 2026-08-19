@@ -39,6 +39,7 @@ namespace Engine
         , InitializationSucceeded(false)
         , RuntimeFailed(false)
         , StartPending(false)
+        , PausePending(false)
         , StopPending(false)
         , TickPendingCount(0)
         , FrameRatePending(false)
@@ -114,6 +115,20 @@ namespace Engine
         {
             const std::lock_guard<std::mutex> Lock(RuntimeMutex); //再生要求状態を保護するGuard
             StartPending = true;
+            PausePending = false;
+            StopPending = false;
+            TickPendingCount = 0;
+        }
+        WakeCondition.notify_one();
+    }
+
+    //Game状態を保持し、連続固定更新だけを一時停止する
+    void GameRuntime::RequestPlaybackPause()
+    {
+        {
+            const std::lock_guard<std::mutex> Lock(RuntimeMutex);
+            PausePending = true;
+            StartPending = false;
             StopPending = false;
             TickPendingCount = 0;
         }
@@ -129,6 +144,7 @@ namespace Engine
             const std::lock_guard<std::mutex> Lock(RuntimeMutex); //停止要求状態を保護するGuard
             StopPending = true;
             StartPending = false;
+            PausePending = false;
             TickPendingCount = 0;
         }
         WakeCondition.notify_one();
@@ -303,13 +319,15 @@ namespace Engine
         }
 
         bool NeedsDraw = true; //Scene出力を更新する場合true
+        bool PlaybackSessionActive = false; //Stop復元用Snapshotを保持している場合true
 
         while (true)
         {
             std::deque<EditorCommand> Commands; //今回実行するEditor操作
             std::optional<RenderWindowSize> Resize; //今回反映する描画Size
             bool Start = false; //今回再生開始する場合true
-            bool Stop = false; //今回再生停止する場合true
+            bool Pause = false; //今回状態を保持して一時停止する場合true
+            bool Stop = false; //今回初期状態へ戻す場合true
             std::uint32_t TickCount = 0; //今回反映する一Frame要求数
             bool ChangeFrameRate = false; //今回FPSを変更する場合true
             std::uint32_t TargetFrameRate = 60; //今回設定するFPS
@@ -326,8 +344,10 @@ namespace Engine
                 Resize = PendingResize;
                 PendingResize.reset();
                 Start = StartPending;
+                Pause = PausePending;
                 Stop = StopPending;
                 StartPending = false;
+                PausePending = false;
                 StopPending = false;
                 TickCount = TickPendingCount;
                 TickPendingCount = 0;
@@ -352,14 +372,63 @@ namespace Engine
 
             if (Start)
             {
-                FrameRate.Start();
-                MessageLog::GetInstance().AddLog("[Info] Playback | Start requested.");
+                if (PlaybackSessionActive || NativeAPI.CapturePlaybackState())
+                {
+                    PlaybackSessionActive = true;
+                    FrameRate.Start();
+                    MessageLog::GetInstance().AddLog("[Info] Playback | Start or resume requested.");
+                }
+                else
+                {
+                    MessageLog::GetInstance().AddPermanentLog(
+                        "[Critical] Playback | Initial state snapshot could not be captured."
+                    );
+                }
+            }
+
+            if (Pause)
+            {
+                FrameRate.Stop();
+                MessageLog::GetInstance().AddLog("[Info] Playback | Pause requested; state was preserved.");
             }
 
             if (Stop)
             {
                 FrameRate.Stop();
-                MessageLog::GetInstance().AddLog("[Info] Playback | Stop requested.");
+
+                if (PlaybackSessionActive)
+                {
+                    if (!NativeAPI.RestorePlaybackState())
+                    {
+                        MessageLog::GetInstance().AddPermanentLog(
+                            "[Critical] Playback | Initial state restore failed."
+                        );
+                        const std::lock_guard<std::mutex> Lock(RuntimeMutex);
+                        RuntimeFailed = true;
+                        Running = false;
+                        break;
+                    }
+
+                    PlaybackSessionActive = false;
+                    NeedsDraw = true;
+                }
+
+                MessageLog::GetInstance().AddLog("[Info] Playback | Stop restored the initial state.");
+            }
+
+            if (TickCount > 0 && !PlaybackSessionActive)
+            {
+                if (!NativeAPI.CapturePlaybackState())
+                {
+                    TickCount = 0;
+                    MessageLog::GetInstance().AddPermanentLog(
+                        "[Critical] Playback | Tick snapshot could not be captured."
+                    );
+                }
+                else
+                {
+                    PlaybackSessionActive = true;
+                }
             }
 
             while (TickCount-- > 0)
@@ -430,6 +499,7 @@ namespace Engine
     bool GameRuntime::HasPendingRequestLocked() const
     {
         return !EditorCommands.empty() || PendingResize.has_value() ||
-            StartPending || StopPending || TickPendingCount > 0 || FrameRatePending;
+            StartPending || PausePending || StopPending || TickPendingCount > 0 ||
+            FrameRatePending;
     }
 }

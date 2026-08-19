@@ -23,6 +23,7 @@
 #include "Cylinder.h"
 #include "DirectX12.h"
 #include "GameApp.h"
+#include "GameInput.h"
 #include "GameObjectTemplate.h"
 #include "HalfSphere.h"
 #include "MessageLog.h"
@@ -964,8 +965,7 @@ namespace Engine
     //戻り値：Keyが現在押されている場合はtrue
     bool EngineAPI::IsKeyDown(std::uint32_t virtualKey) const
     {
-        return virtualKey <= 0xffu &&
-            (GetAsyncKeyState(static_cast<int>(virtualKey)) & 0x8000) != 0;
+        return GameInput::IsKeyDown(virtualKey);
     }
 
     //概要：循環を防止しながら指定Objectの親を変更する
@@ -1053,6 +1053,27 @@ namespace Engine
     void EngineAPI::UpdateExtensions(float deltaTime)
     {
         Extensions.Update(deltaTime);
+    }
+
+    //再生開始又は最初のTick直前のScene定義をStop復元用に保存する
+    bool EngineAPI::CapturePlaybackState()
+    {
+        return Application.CapturePlaybackState();
+    }
+
+    //Main Programを終了し、Sceneを初期状態へ戻してMain Programを再初期化する
+    bool EngineAPI::RestorePlaybackState()
+    {
+        Extensions.DestroyInstance();
+        const bool Restored = Application.RestorePlaybackState();
+        const bool Recreated = Extensions.CreateInstance();
+
+        if (Restored)
+        {
+            IncrementRevision();
+        }
+
+        return Restored && Recreated;
     }
 
     //概要：Windows Editorから受け取った汎用Object、Component、Script操作を実行する

@@ -1,6 +1,6 @@
 # ゲーム組み込みAPI説明
 
-更新日: 2026-08-19
+更新日: 2026-08-20
 
 ## MainとSubの違い
 
@@ -65,27 +65,71 @@ Main Programでは同じ機能を`SetObjectColor`と`MultiplyObjectColor`から�
 
 `EngineExtensionAPI.h`の`EngineHostAPI`は追記専用のC ABI関数表です。Scene、Object、Component、Scriptの列挙・作成・検索・編集に加え、Transform、親子関係、絶対色、乗算色、Keyboard入力を外部DLLから操作できます。
 
-通常のMain ProgramはSceneごとに一つのCPPを持ち、`Init`、`Update`、`End`だけを実装します。`GameEngineAPI.h`の組込みAPIへObject名を渡すと、Scene内で一意な安定IDへ内部解決されます。
+通常のMain ProgramはSceneごとに一つのCPPを持ち、`Init`、`Update`、`End`を実装します。`GameEngineAPI.h`の組込みAPIへObject名を渡すと、Scene内で一意な安定IDへ内部解決されます。
+
+Object生成関数は数値IDではなく`ObjectHandle`を返します。HandleはScene IDとObject IDを保持する非所有参照なので、変数や`std::vector`へ保存できます。Engine内部の生PointerをDLLへ公開しないため、再生停止時のScene復元やHot Reload後に古いPointerを誤参照しません。取得済みHandleの情報読取はID索引から直接行います。
 
 ```cpp
+#include "GameEngineAPI.h"
+
+#include <vector>
+
 using namespace EngineGame;
 
 namespace Game::MainScene
 {
+    ObjectHandle Player;
+    std::vector<ObjectHandle> Enemies;
+
     void Init()
     {
-        AddObject.CreateCapsuleModel("PlayerCapsule");
-        Object.SetSize("PlayerCapsule", 1.0f, 2.0f, 1.0f);
+        Player = AddObject.CreateCapsuleModel("PlayerCapsule");
+        Player.SetSize(1.0f, 2.0f, 1.0f);
+
+        Enemies = AddObject.CreateBoxes("Enemy", 100);
     }
 
-    void Update(float deltaTime) { (void)deltaTime; }
+    void Update(float deltaTime)
+    {
+        for (ObjectHandle& Enemy : Enemies)
+        {
+            Enemy.Move(deltaTime, 0.0f, 0.0f);
+        }
+    }
+
     void End() {}
 }
 
 ENGINE_REGISTER_SCENE(MainScene)
 ```
 
-主な入口は`AddObject`、`Object`、`Scene`、`Input`、`Log`です。`Object`には`Exists`、`SetSize`、`SetPosition`、`SetTransform`、`Move`、`SetColor`、`MultiplyColor`、`Remove`、`AttachScript`があります。
+主な入口は`AddObject`、`Object`、`Scene`、`Input`、`Log`です。
+
+- `AddObject.Create...`: 1個生成して`ObjectHandle`を返します。
+- `AddObject.CreateMany`、`CreateBoxes`、`CreateCapsules`: まとめて生成し`std::vector<ObjectHandle>`を返します。
+- `Object.Find("ExactName")`: 一意名から1個を取得します。
+- `Object.FindAll("NamePart")`: 名前の一部が一致する全Objectを取得します。既定では大文字小文字を区別しません。
+- `Object.FindByType(...)`: Objectの具象型で取得します。
+- `Object.FindByComponent(...)`: 指定ComponentクラスがAttachされたObjectを取得します。
+- `Object.FindByScript("script.key")`: 指定ScriptがAttachされたObjectを取得します。
+- `ObjectHandle.GetComponent(...)`、`GetComponents(...)`: `ComponentHandle`を1個又は配列で取得します。
+
+```cpp
+const auto NamedEnemies = Object.FindAll("Enemy");
+const auto CameraObjects = Object.FindByComponent(
+    EngineExternalComponentType::Camera
+);
+
+for (const ObjectHandle& Object : CameraObjects)
+{
+    ComponentHandle Camera = Object.GetComponent(
+        EngineExternalComponentType::Camera
+    );
+    Camera.SetActive(true);
+}
+```
+
+個別Objectを簡潔に操作したい場合は`Object.SetPosition("Player", ...)`のような名前指定APIも引き続き利用できます。`ObjectHandle`には`SetSize`、`SetPosition`、`SetTransform`、`Move`、`SetColor`、`MultiplyColor`、`SetActive`、`AttachScript`、`Remove`があります。
 
 上級者は次の入口から低Level C ABI関数表を直接利用できます。
 
@@ -94,6 +138,32 @@ const EngineHostAPI* Host = Advanced.Host();
 ```
 
 DLLのExportやScene ID解決は`Templates/EngineExtension/MainProgramAdapter.cpp`が受け持つため、通常は編集しません。互換用の`EngineProgramAPI`も残しているため、IDをCacheした高度なコードと名前中心のコードを混在できます。
+
+## Init、終了順序、再生状態
+
+高水準Main Programの状態はConstructor／Destructorではなく`Init`と`End`で管理します。再生停止後にも同じDLLからInstanceが再生成されるため、経過時間やHandle配列は`Init`で明示的に初期化してください。`Update`内の`static`局所変数は再生停止だけでは初期値へ戻らないため、再生状態には使用しません。
+
+通常は`ENGINE_REGISTER_SCENE`で十分です。Scene間参照の解除順序が必要な場合だけ`StartDestroy`と`EndDestroy`を実装し、`ENGINE_REGISTER_SCENE_LIFECYCLE`を使います。
+
+```cpp
+void StartDestroy() { Enemies.clear(); } //全SceneのEndより前に参照を切る
+void End() { /* 通常の終了処理 */ }
+void EndDestroy() { /* 全SceneのEnd後に行う最終解放 */ }
+```
+
+複数Sceneの終了順は、全Sceneの`StartDestroy`、逆登録順の`End`、逆登録順の`EndDestroy`です。
+
+- `Pause`: Scene、Object、変数を保持したまま固定更新だけを止めます。`Resume`で続きから再開します。
+- `Stop`: 再生開始直前のScene定義へ戻し、Main Programを破棄・再生成して`Init`を実行します。
+- `Tick`: 停止又は一時停止中に1固定Frameだけ進めます。
+
+Keyboard入力はゲーム画面がFocusを持つ間だけ有効です。ゲーム画面をクリックするとProgram／TabからFocusが移り、Editor側のShortcutが同時に動作しません。
+
+## 描画更新の扱い
+
+位置、回転、ScaleはObjectの行列だけを更新します。同じ寸法や色を再指定した場合は何もしません。色変更は頂点Bufferを再作成・上書きせずDraw単位のRoot Constantsへ反映し、同一Device上のPrimitiveはRoot SignatureとPipeline Stateを共有します。形状の寸法や分割数が変わった場合だけMeshを再構築します。
+
+Program Editorでは`AddObject.`、`Object.`などの`.`入力直後に、その入口で利用できる関数だけを候補表示します。Handle変数の`.`ではObject／Component操作候補を表示します。
 
 ## 組み込み例
 

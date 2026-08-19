@@ -16,6 +16,29 @@ public static class NativeProgramEditorLayoutVerification
         public uint Code;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeRectangle
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeGuiThreadInfo
+    {
+        public int Size;
+        public uint Flags;
+        public IntPtr Active;
+        public IntPtr Focus;
+        public IntPtr Capture;
+        public IntPtr MenuOwner;
+        public IntPtr MoveSize;
+        public IntPtr Caret;
+        public NativeRectangle CaretRectangle;
+    }
+
     [DllImport("user32.dll")]
     public static extern bool EnumWindows(EnumWindowCallback callback, IntPtr lparam);
 
@@ -39,6 +62,12 @@ public static class NativeProgramEditorLayoutVerification
 
     [DllImport("user32.dll")]
     public static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetGUIThreadInfo(uint threadId, ref NativeGuiThreadInfo information);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
     private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
@@ -157,6 +186,20 @@ public static class NativeProgramEditorLayoutVerification
     {
         return (GetWindowLongPtr(window, -16).ToInt64() & 0x10000000L) != 0;
     }
+
+    //Summary: Reads the focused child owned by the target window's UI thread.
+    //Arguments: window=Any window owned by the target UI thread.
+    //Return: Focused window handle, or zero when unavailable.
+    public static IntPtr ReadFocusedWindow(IntPtr window)
+    {
+        uint processId;
+        uint threadId = GetWindowThreadProcessId(window, out processId);
+        NativeGuiThreadInfo information = new NativeGuiThreadInfo();
+        information.Size = Marshal.SizeOf(information);
+        return GetGUIThreadInfo(threadId, ref information)
+            ? information.Focus
+            : IntPtr.Zero;
+    }
 }
 "@
 
@@ -223,6 +266,157 @@ try
         $ProgramStatusHandle -eq [IntPtr]::Zero)
     {
         throw "Program editor controls were not created."
+    }
+
+    $RenderHandle = [NativeProgramEditorLayoutVerification]::FindChildById($WindowHandle, 1000)
+    $StartHandle = [NativeProgramEditorLayoutVerification]::FindChildById($WindowHandle, 1001)
+    $StopHandle = [NativeProgramEditorLayoutVerification]::FindChildById($WindowHandle, 1002)
+    $TickHandle = [NativeProgramEditorLayoutVerification]::FindChildById($WindowHandle, 1003)
+    $PauseHandle = [NativeProgramEditorLayoutVerification]::FindChildById($WindowHandle, 1044)
+
+    if ($RenderHandle -eq [IntPtr]::Zero -or
+        $StartHandle -eq [IntPtr]::Zero -or
+        $PauseHandle -eq [IntPtr]::Zero -or
+        $StopHandle -eq [IntPtr]::Zero -or
+        $TickHandle -eq [IntPtr]::Zero)
+    {
+        throw "Playback controls or render viewport were not created."
+    }
+
+    for ($Attempt = 0; $Attempt -lt 200; ++$Attempt)
+    {
+        if ([NativeProgramEditorLayoutVerification]::IsWindowEnabled($StartHandle) -and
+            -not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($PauseHandle) -and
+            -not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StopHandle) -and
+            [NativeProgramEditorLayoutVerification]::IsWindowEnabled($TickHandle))
+        {
+            break
+        }
+
+        Start-Sleep -Milliseconds 25
+    }
+
+    if (-not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StartHandle) -or
+        [NativeProgramEditorLayoutVerification]::IsWindowEnabled($PauseHandle) -or
+        [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StopHandle) -or
+        -not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($TickHandle))
+    {
+        $InitialState = @(
+            [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StartHandle),
+            [NativeProgramEditorLayoutVerification]::IsWindowEnabled($PauseHandle),
+            [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StopHandle),
+            [NativeProgramEditorLayoutVerification]::IsWindowEnabled($TickHandle)
+        ) -join ','
+        throw "Initial playback button state was invalid. Start,Pause,Stop,Tick=$InitialState"
+    }
+
+    [NativeProgramEditorLayoutVerification]::SendMessage(
+        $WindowHandle,
+        0x0111,
+        [IntPtr]1001,
+        $StartHandle
+    ) | Out-Null
+    Start-Sleep -Milliseconds 100
+
+    if ([NativeProgramEditorLayoutVerification]::IsWindowEnabled($StartHandle) -or
+        -not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($PauseHandle) -or
+        -not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StopHandle) -or
+        [NativeProgramEditorLayoutVerification]::IsWindowEnabled($TickHandle))
+    {
+        throw "Playing button state was invalid."
+    }
+
+    [NativeProgramEditorLayoutVerification]::SendMessage(
+        $WindowHandle,
+        0x0111,
+        [IntPtr]1044,
+        $PauseHandle
+    ) | Out-Null
+    Start-Sleep -Milliseconds 100
+
+    if (-not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StartHandle) -or
+        [NativeProgramEditorLayoutVerification]::ReadText($StartHandle) -ne "Resume" -or
+        [NativeProgramEditorLayoutVerification]::IsWindowEnabled($PauseHandle) -or
+        -not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StopHandle) -or
+        -not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($TickHandle))
+    {
+        throw "Paused button state was invalid."
+    }
+
+    [NativeProgramEditorLayoutVerification]::SendMessage(
+        $WindowHandle,
+        0x0111,
+        [IntPtr]1002,
+        $StopHandle
+    ) | Out-Null
+    Start-Sleep -Milliseconds 150
+
+    if (-not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StartHandle) -or
+        [NativeProgramEditorLayoutVerification]::ReadText($StartHandle) -ne "Start" -or
+        [NativeProgramEditorLayoutVerification]::IsWindowEnabled($PauseHandle) -or
+        [NativeProgramEditorLayoutVerification]::IsWindowEnabled($StopHandle) -or
+        -not [NativeProgramEditorLayoutVerification]::IsWindowEnabled($TickHandle))
+    {
+        throw "Stopped button state was invalid."
+    }
+
+    $LogListHandle = [NativeProgramEditorLayoutVerification]::FindChildById($WindowHandle, 1006)
+    $StopRestoreConfirmed = $false
+
+    for ($Attempt = 0; $Attempt -lt 200 -and -not $StopRestoreConfirmed; ++$Attempt)
+    {
+        $LogCount = [NativeProgramEditorLayoutVerification]::SendMessage(
+            $LogListHandle,
+            0x018B,
+            [IntPtr]::Zero,
+            [IntPtr]::Zero
+        ).ToInt32()
+
+        for ($Index = 0; $Index -lt $LogCount; ++$Index)
+        {
+            $TextLength = [NativeProgramEditorLayoutVerification]::SendMessage(
+                $LogListHandle,
+                0x018A,
+                [IntPtr]$Index,
+                [IntPtr]::Zero
+            ).ToInt32()
+            $Text = New-Object System.Text.StringBuilder($TextLength + 1)
+            [NativeProgramEditorLayoutVerification]::SendMessageBuilder(
+                $LogListHandle,
+                0x0189,
+                [IntPtr]$Index,
+                $Text
+            ) | Out-Null
+
+            if ($Text.ToString() -match "Playback \| Stop restored the initial state")
+            {
+                $StopRestoreConfirmed = $true
+                break
+            }
+        }
+
+        if (-not $StopRestoreConfirmed)
+        {
+            Start-Sleep -Milliseconds 25
+        }
+    }
+
+    if (-not $StopRestoreConfirmed)
+    {
+        throw "Game runtime did not confirm restoration of the pre-play state."
+    }
+
+    [NativeProgramEditorLayoutVerification]::SendMessage(
+        $WindowHandle,
+        0x0111,
+        [IntPtr]1000,
+        $RenderHandle
+    ) | Out-Null
+    Start-Sleep -Milliseconds 100
+
+    if ([NativeProgramEditorLayoutVerification]::ReadFocusedWindow($WindowHandle) -ne $RenderHandle)
+    {
+        throw "Render viewport click did not move focus away from the editor tab."
     }
 
     if ([NativeProgramEditorLayoutVerification]::HasVisibleStyle($ProgramEditorHandle))
@@ -332,12 +526,12 @@ try
         $ProgramEditorHandle,
         0x00C2,
         [IntPtr]1,
-        "mul"
+        "AddObject"
     ) | Out-Null
     [NativeProgramEditorLayoutVerification]::SendMessage(
         $ProgramEditorHandle,
-        0x0101,
-        [IntPtr]0x23,
+        0x0102,
+        [IntPtr]0x2E,
         [IntPtr]::Zero
     ) | Out-Null
     Start-Sleep -Milliseconds 150
@@ -368,7 +562,7 @@ try
         $SuggestionNames.Add($Text.ToString())
     }
 
-    if ($SuggestionNames -notcontains "MultiplyObjectColor")
+    if ($SuggestionNames -notcontains "CreateBoxes")
     {
         $CurrentEditorText = [NativeProgramEditorLayoutVerification]::ReadText($ProgramEditorHandle)
         $TextTail = $CurrentEditorText.Substring([Math]::Max(0, $CurrentEditorText.Length - 40))
@@ -379,10 +573,10 @@ try
             [IntPtr]::Zero
         ).ToInt32()
         $StatusText = [NativeProgramEditorLayoutVerification]::ReadText($ProgramStatusHandle)
-        throw "Engine API suggestion was not shown. Tab=$SelectedTab Status=$StatusText Tail=$TextTail Suggestions=$($SuggestionNames -join ',')"
+        throw "AddObject member suggestions were not shown. Tab=$SelectedTab Status=$StatusText Tail=$TextTail Suggestions=$($SuggestionNames -join ',')"
     }
 
-    "Program editor visibility, deferred layout, undo/redo and API suggestions verified. Suggestions=$($SuggestionNames -join ',')"
+    "Playback states, viewport focus, program layout, undo/redo and AddObject member suggestions verified. Suggestions=$($SuggestionNames -join ',')"
 }
 finally
 {

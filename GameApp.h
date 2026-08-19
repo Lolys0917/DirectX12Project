@@ -18,6 +18,7 @@
 
 #include <Windows.h>
 #include <cstdint>
+#include <memory>
 
 #include "GraphicBase.h"
 #include "SceneManager.h"
@@ -78,6 +79,12 @@ namespace Engine
         // 戻り値: 全ResourceのResizeに成功した場合はtrue
         bool Resize(uint32_t width, uint32_t height);
 
+        //再生開始時点のScene定義をStop復元用に一度だけ保存する
+        bool CapturePlaybackState();
+
+        //保存済みScene定義を初期化し、再生開始前の状態へ戻す
+        bool RestorePlaybackState();
+
         // Applicationが所有するSceneManagerを取得する
         // 戻り値: SceneManagerへの参照
         SceneManager& GetSceneManager();
@@ -91,6 +98,8 @@ namespace Engine
     private:
         GraphicBase Graphics; // DirectX 12描画基盤の所有者
         SceneManager Scenes; // 全SceneとViewScene状態の所有者
+        std::unique_ptr<SceneManager> PlaybackSnapshot; //再生開始直前のCPU Scene定義
+        HWND RenderWindow; //Game入力Focusを受け取る描画子Window
         bool Initialized; // Application全体の初期化完了状態
     };
 }

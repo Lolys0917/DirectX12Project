@@ -23,6 +23,7 @@
 #include <DirectXMath.h>
 
 #include "MessageLog.h"
+#include "GameInput.h"
 #include "Object.h"
 #include "PrimitiveObject.h"
 #include "ScriptModuleAPI.h"
@@ -297,10 +298,7 @@ namespace Engine
         )
         {
             (void)context;
-            return virtualKey <= 0xffu &&
-                (GetAsyncKeyState(static_cast<int>(virtualKey)) & 0x8000) != 0
-                ? 1u
-                : 0u;
+            return GameInput::IsKeyDown(virtualKey) ? 1u : 0u;
         }
 
         //概要：DLL Scriptへ所有Primitive ObjectのRGBA色をコピーする

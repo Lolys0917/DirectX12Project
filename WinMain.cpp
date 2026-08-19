@@ -261,6 +261,11 @@ int WINAPI WinMain(
             Runtime.RequestPlaybackStart();
         }
 
+        if (Window.ConsumePause())
+        {
+            Runtime.RequestPlaybackPause();
+        }
+
         if (Window.ConsumeStop())
         {
             Runtime.RequestPlaybackStop();

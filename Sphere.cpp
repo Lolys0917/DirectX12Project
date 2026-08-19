@@ -37,7 +37,14 @@ namespace Engine
     void Sphere::SetRadius(float radius)
     {
         constexpr float MinimumRadius = 0.0001f; //ゼロ球を防ぐ最小半径
-        Radius = (std::max)(radius, MinimumRadius);
+        const float NewRadius = (std::max)(radius, MinimumRadius);
+
+        if (Radius == NewRadius)
+        {
+            return;
+        }
+
+        Radius = NewRadius;
         BuildMesh();
     }
 
@@ -46,8 +53,16 @@ namespace Engine
     //戻り値：なし
     void Sphere::SetDivision(std::uint32_t slice, std::uint32_t stack)
     {
-        Slice = (std::max<std::uint32_t>)(slice, 3);
-        Stack = (std::max<std::uint32_t>)(stack, 2);
+        const std::uint32_t NewSlice = (std::max<std::uint32_t>)(slice, 3);
+        const std::uint32_t NewStack = (std::max<std::uint32_t>)(stack, 2);
+
+        if (Slice == NewSlice && Stack == NewStack)
+        {
+            return;
+        }
+
+        Slice = NewSlice;
+        Stack = NewStack;
         BuildMesh();
     }
 

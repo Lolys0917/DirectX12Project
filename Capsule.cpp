@@ -38,8 +38,16 @@ namespace Engine
     void Capsule::SetSize(float radius, float height)
     {
         constexpr float MinimumRadius = 0.0001f; //ゼロ形状を防ぐ最小半径
-        Radius = (std::max)(radius, MinimumRadius);
-        Height = (std::max)(height, Radius * 2.0f);
+        const float NewRadius = (std::max)(radius, MinimumRadius);
+        const float NewHeight = (std::max)(height, NewRadius * 2.0f);
+
+        if (Radius == NewRadius && Height == NewHeight)
+        {
+            return;
+        }
+
+        Radius = NewRadius;
+        Height = NewHeight;
         BuildMesh();
     }
 
@@ -48,8 +56,16 @@ namespace Engine
     //戻り値：なし
     void Capsule::SetDivision(std::uint32_t slice, std::uint32_t hemisphereStack)
     {
-        Slice = (std::max<std::uint32_t>)(slice, 3);
-        HemisphereStack = (std::max<std::uint32_t>)(hemisphereStack, 1);
+        const std::uint32_t NewSlice = (std::max<std::uint32_t>)(slice, 3);
+        const std::uint32_t NewStack = (std::max<std::uint32_t>)(hemisphereStack, 1);
+
+        if (Slice == NewSlice && HemisphereStack == NewStack)
+        {
+            return;
+        }
+
+        Slice = NewSlice;
+        HemisphereStack = NewStack;
         BuildMesh();
     }
 

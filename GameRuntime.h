@@ -60,7 +60,10 @@ namespace Engine
         //戻り値：なし
         void RequestPlaybackStart();
 
-        //概要：Game Threadへ連続再生停止を要求する
+        //Game状態を保持したまま連続更新だけを一時停止する
+        void RequestPlaybackPause();
+
+        //概要：Game Threadへ再生開始前状態へ戻す停止を要求する
         //引数：なし
         //戻り値：なし
         void RequestPlaybackStop();
@@ -121,7 +124,8 @@ namespace Engine
         bool InitializationSucceeded; //GameApp初期化に成功した場合true
         bool RuntimeFailed; //初期化後に継続不能Errorが発生した場合true
         bool StartPending; //再生開始要求
-        bool StopPending; //再生停止要求
+        bool PausePending; //状態を保持する一時停止要求
+        bool StopPending; //初期状態へ戻す停止要求
         std::uint32_t TickPendingCount; //未処理一Frame更新数
         bool FrameRatePending; //RequestedFrameRateを反映する場合true
     };

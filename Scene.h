@@ -70,6 +70,12 @@ namespace Engine
         // 戻り値: 初期化済み複製Scene、失敗した場合はnullptr
         std::unique_ptr<Scene> Clone(DirectX12& dx12) const;
 
+        //GPU ResourceとLifecycleを開始せず、再生停止時の復元用定義を複製する
+        std::unique_ptr<Scene> CloneDefinition() const;
+
+        //CloneDefinitionで作成したSceneのComponentと描画Resourceを開始する
+        bool ActivateClonedDefinition(DirectX12& dx12);
+
         // 所有する全Componentを終了する
         void Finalize();
 
@@ -157,6 +163,8 @@ namespace Engine
             SceneID sceneID,
             const std::string& resolvedName
         );
+
+        std::unique_ptr<Scene> CloneInternal(DirectX12* dx12) const;
 
     private:
         SceneID ID; // SceneManager内で一意かつ再利用しないSceneID

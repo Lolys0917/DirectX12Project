@@ -38,6 +38,8 @@ namespace Engine
 
         bool LoadOrReload(const std::filesystem::path& modulePath);
         void Unload();
+        void DestroyInstance();
+        bool CreateInstance();
         void Update(float deltaTime);
         bool IsLoaded() const;
         std::uint64_t GetGeneration() const;

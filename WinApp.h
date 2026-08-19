@@ -125,6 +125,9 @@ namespace Engine
          */
         bool ConsumeStart();
 
+        //Pauseボタンの未処理イベントを1件取得する
+        bool ConsumePause();
+
         /**
          * Stopボタンの未処理イベントを1件取得する
          * @return Stop要求が存在した場合はtrue
@@ -252,6 +255,13 @@ namespace Engine
             Component
         };
 
+        enum class PlaybackState : std::uint8_t
+        {
+            Stopped,
+            Playing,
+            Paused
+        };
+
         struct EditorTreeNode final
         {
             EditorTreeNodeKind Kind = EditorTreeNodeKind::Scene; //Tree上の要素種別
@@ -368,7 +378,8 @@ namespace Engine
         HWND TransformEditsHwnd[9];  // Local TransformのXYZ入力
         HWND ApplyObjectButtonHwnd;  // Inspector内容の適用
         HWND StartButtonHwnd;       // ゲーム開始ボタン
-        HWND StopButtonHwnd;        // ゲーム停止ボタン
+        HWND PauseButtonHwnd;       // 状態を保持する一時停止ボタン
+        HWND StopButtonHwnd;        // 初期状態へ戻す停止ボタン
         HWND TickButtonHwnd;        // ゲーム1フレーム更新ボタン
         HWND StatusLabelHwnd;       // 現在の再生状態テキスト
         HWND FrameRateLabelHwnd;    // FPS設定見出しテキスト
@@ -406,6 +417,7 @@ namespace Engine
         int SplitDragOffset;        // ドラッグ開始位置と分割位置の差
         float SplitRatio;           // ウィンドウ幅に対する左描画領域の比率
         bool StartRequested;        // 未処理のStart要求が存在するか
+        bool PauseRequested;        // 未処理のPause要求が存在するか
         bool StopRequested;         // 未処理のStop要求が存在するか
         bool ResizeRequested;       // 未処理の描画領域サイズ変更が存在するか
         bool SplitDragging;         // スプリッターをドラッグ中か
@@ -413,7 +425,7 @@ namespace Engine
         bool ProgramHorizontalSplitDragging; // Program一覧とEditorの分割線をドラッグ中か
         bool ProgramVerticalSplitDragging; // Program Fileと関数一覧の分割線をドラッグ中か
         bool TreeDragging;          // Object親変更のTreeドラッグ中か
-        bool IsPlaying;             // UI上でゲームを再生中として扱うか
+        PlaybackState CurrentPlaybackState; //UI上の再生、一時停止、停止状態
         bool UpdatingFrameRate;     // FPSコントロールの相互更新中か
         bool ClearLogsRequested;    // 未処理のログ一括消去要求が存在するか
         bool ClassRegistered;       // 親ウィンドウクラスを登録済みか

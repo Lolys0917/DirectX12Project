@@ -6,6 +6,7 @@
 //||
 //||  更新内容 :::::::::::::::::::::::::::::::::
 //||
+//||  2026_08_20  v2.30  描画色をRoot Constants化し同一DeviceのPipelineを共有
 //||  2026_08_19  v2.20  GPU Resource準備状態の読取APIを追加
 //||  2026_07_13  v2.10  Mesh Resource作成と遅延再生成失敗をMessageLogへ記録
 //||  2026_07_13  v2.00  Upload BufferとRoot Constantsによる共通描画を実装
@@ -36,6 +37,8 @@ namespace Engine
 cbuffer MeshConstants : register(b0)
 {
     float4x4 WorldViewProjection;
+    float4 ObjectColor;
+    uint UseObjectColor;
 };
 
 struct VSInput
@@ -56,7 +59,7 @@ VSOutput VSMain(VSInput input)
 {
     VSOutput output;
     output.Position = mul(float4(input.Position, 1.0f), WorldViewProjection);
-    output.Color = input.Color;
+    output.Color = UseObjectColor != 0 ? ObjectColor : input.Color;
     return output;
 }
 
@@ -66,6 +69,27 @@ float4 PSMain(VSOutput input) : SV_TARGET
 }
 
 )"; //共通Vertex Color描画用HLSL Source
+
+        struct MeshRootConstants final
+        {
+            DirectX::XMFLOAT4X4 WorldViewProjection;
+            DirectX::XMFLOAT4 ObjectColor;
+            std::uint32_t UseObjectColor;
+            std::uint32_t Padding[3];
+        }; //256-bit境界へ揃えた描画単位Root Constants
+
+        static_assert(sizeof(MeshRootConstants) == sizeof(std::uint32_t) * 24);
+
+        struct SharedMeshPipeline final
+        {
+            ID3D12Device* Device = nullptr;
+            DXGI_FORMAT RenderTargetFormat = DXGI_FORMAT_UNKNOWN;
+            DXGI_FORMAT DepthStencilFormat = DXGI_FORMAT_UNKNOWN;
+            Microsoft::WRL::ComPtr<ID3D12RootSignature> RootSignature;
+            Microsoft::WRL::ComPtr<ID3D12PipelineState> PipelineState;
+        }; //同一Deviceの全VertexMeshで共有する不変Pipeline
+
+        SharedMeshPipeline SharedPipeline; //Game Threadだけが生成・参照する共通Pipeline
 
         //CPU Dataを保持するUpload Heap Bufferを作成する
         //引数: dx12 描画基盤、sourceData 転送元、dataSize Byte数、resource 作成先
@@ -135,6 +159,8 @@ float4 PSMain(VSOutput input) : SV_TARGET
     VertexMesh::VertexMesh()
         : VertexBufferView{}
         , IndexBufferView{}
+        , ColorOverride(1.0f, 1.0f, 1.0f, 1.0f)
+        , UseColorOverride(false)
         , GPUResourceReady(false)
         , GPUResourceDirty(true)
     {
@@ -273,18 +299,20 @@ float4 PSMain(VSOutput input) : SV_TARGET
             renderContext.ViewCamera.GetViewProjectionMatrix(); //現在CameraのViewProjection行列
         const DirectX::XMMATRIX WorldViewProjection =
             world * ViewProjection; //MeshのWVP行列
-        DirectX::XMFLOAT4X4 RootConstants{}; //CommandListへ直接記録する転置済みWVP
+        MeshRootConstants RootConstants{}; //CommandListへ直接記録するWVPと描画色
         DirectX::XMStoreFloat4x4(
-            &RootConstants,
+            &RootConstants.WorldViewProjection,
             DirectX::XMMatrixTranspose(WorldViewProjection)
         );
+        RootConstants.ObjectColor = ColorOverride;
+        RootConstants.UseObjectColor = UseColorOverride ? 1u : 0u;
 
         ID3D12GraphicsCommandList* CommandList = Dx12.GetCommandList(); //描画命令の記録先
         CommandList->SetGraphicsRootSignature(RootSignature.Get());
         CommandList->SetPipelineState(PipelineState.Get());
         CommandList->SetGraphicsRoot32BitConstants(
             0,
-            16,
+            24,
             &RootConstants,
             0
         );
@@ -313,6 +341,13 @@ float4 PSMain(VSOutput input) : SV_TARGET
         GPUResourceDirty = true;
     }
 
+    //頂点Bufferを変更せず、このMeshの描画色をRoot Constantsで上書きする
+    void VertexMesh::SetVertexColor(const DirectX::XMFLOAT4& color)
+    {
+        ColorOverride = color;
+        UseColorOverride = true;
+    }
+
     //CPU Meshと一致するGPU Resourceが描画可能か確認する
     //戻り値 : Resource作成済みかつCPU変更後の再生成が不要な場合はtrue
     bool VertexMesh::IsGPUResourceReady() const
@@ -325,11 +360,25 @@ float4 PSMain(VSOutput input) : SV_TARGET
     //戻り値: 作成に成功した場合はtrue
     bool VertexMesh::CreateRootSignature(DirectX12& dx12)
     {
-        D3D12_ROOT_PARAMETER RootParameter{}; //16 DWORD WVP用Root Constants
+        ID3D12Device* Device = dx12.GetDevice(); //Pipeline共有先Device
+
+        if (SharedPipeline.Device != Device)
+        {
+            SharedPipeline = {};
+            SharedPipeline.Device = Device;
+        }
+
+        if (SharedPipeline.RootSignature)
+        {
+            RootSignature = SharedPipeline.RootSignature;
+            return true;
+        }
+
+        D3D12_ROOT_PARAMETER RootParameter{}; //24 DWORD WVP／描画色用Root Constants
         RootParameter.ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
         RootParameter.Constants.ShaderRegister = 0;
         RootParameter.Constants.RegisterSpace = 0;
-        RootParameter.Constants.Num32BitValues = 16;
+        RootParameter.Constants.Num32BitValues = 24;
         RootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
 
         D3D12_ROOT_SIGNATURE_DESC Description{}; //RootSignature設定
@@ -354,13 +403,19 @@ float4 PSMain(VSOutput input) : SV_TARGET
             return false;
         }
 
-        Result = dx12.GetDevice()->CreateRootSignature(
+        Result = Device->CreateRootSignature(
             0,
             Signature->GetBufferPointer(),
             Signature->GetBufferSize(),
             IID_PPV_ARGS(&RootSignature)
         );
-        return SUCCEEDED(Result);
+        if (SUCCEEDED(Result))
+        {
+            SharedPipeline.RootSignature = RootSignature;
+            return true;
+        }
+
+        return false;
     }
 
     //共通Vertex Color描画用PipelineStateを作成する
@@ -368,6 +423,17 @@ float4 PSMain(VSOutput input) : SV_TARGET
     //戻り値: 作成に成功した場合はtrue
     bool VertexMesh::CreatePipelineState(DirectX12& dx12)
     {
+        const DXGI_FORMAT RenderTargetFormat = dx12.GetBackBufferFormat(); //共有条件のColor Format
+        const DXGI_FORMAT DepthStencilFormat = dx12.GetDepthStencilFormat(); //共有条件のDepth Format
+
+        if (SharedPipeline.PipelineState &&
+            SharedPipeline.RenderTargetFormat == RenderTargetFormat &&
+            SharedPipeline.DepthStencilFormat == DepthStencilFormat)
+        {
+            PipelineState = SharedPipeline.PipelineState;
+            return true;
+        }
+
         Microsoft::WRL::ComPtr<ID3DBlob> VertexShaderBlob; //Compile済みVertex Shader
         Microsoft::WRL::ComPtr<ID3DBlob> PixelShaderBlob; //Compile済みPixel Shader
         Microsoft::WRL::ComPtr<ID3DBlob> ErrorBlob; //Shader Compile失敗内容
@@ -426,8 +492,8 @@ float4 PSMain(VSOutput input) : SV_TARGET
         PipelineDescription.PrimitiveTopologyType =
             D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         PipelineDescription.NumRenderTargets = 1;
-        PipelineDescription.RTVFormats[0] = dx12.GetBackBufferFormat();
-        PipelineDescription.DSVFormat = dx12.GetDepthStencilFormat();
+        PipelineDescription.RTVFormats[0] = RenderTargetFormat;
+        PipelineDescription.DSVFormat = DepthStencilFormat;
         PipelineDescription.SampleDesc.Count = 1;
         PipelineDescription.SampleDesc.Quality = 0;
         PipelineDescription.SampleMask = UINT_MAX;
@@ -475,7 +541,15 @@ float4 PSMain(VSOutput input) : SV_TARGET
             &PipelineDescription,
             IID_PPV_ARGS(&PipelineState)
         );
-        return SUCCEEDED(Result);
+        if (SUCCEEDED(Result))
+        {
+            SharedPipeline.RenderTargetFormat = RenderTargetFormat;
+            SharedPipeline.DepthStencilFormat = DepthStencilFormat;
+            SharedPipeline.PipelineState = PipelineState;
+            return true;
+        }
+
+        return false;
     }
 
     //Upload Heapへ頂点Bufferを作成する
