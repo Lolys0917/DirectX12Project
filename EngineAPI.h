@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include "EditorTypes.h"
@@ -105,6 +106,16 @@ namespace Engine
         bool RenameObject(SceneID sceneID, ObjectID objectID, const std::string& name);
         bool SetObjectActive(SceneID sceneID, ObjectID objectID, bool active);
         bool SetObjectTransform(SceneID sceneID, ObjectID objectID, const EditorTransformInfo& transform);
+        bool SetObjectOrganization(
+            SceneID sceneID,
+            ObjectID objectID,
+            const std::string& group,
+            const std::string& tag,
+            std::uint32_t layer,
+            std::int32_t groupOrder,
+            std::int32_t executionOrder
+        );
+        bool SetGroupActive(SceneID sceneID, const std::string& group, bool active);
         bool SetObjectSize(SceneID sceneID, ObjectID objectID, const EditorVector3& size);
         bool SetObjectSize(SceneID sceneID, const std::string& name, const EditorVector3& size);
         bool TryGetObjectColor(SceneID sceneID, ObjectID objectID, EditorColor& color) const;
@@ -116,6 +127,17 @@ namespace Engine
         bool RemoveComponent(SceneID sceneID, ComponentID componentID);
         bool RenameComponent(SceneID sceneID, ComponentID componentID, const std::string& name);
         bool SetComponentActive(SceneID sceneID, ComponentID componentID, bool active);
+        bool SetScriptMember(
+            SceneID sceneID,
+            ComponentID componentID,
+            const std::string& member,
+            const std::string& value
+        );
+        bool InvokeScriptFunction(
+            SceneID sceneID,
+            ComponentID componentID,
+            const std::string& function
+        );
         bool AttachScript(
             SceneID sceneID,
             ObjectID objectID,
@@ -128,17 +150,33 @@ namespace Engine
         EditorSnapshot CreateEditorSnapshot() const;
         std::uint64_t GetRevision() const;
 
+        //Main Programの新旧世代が宣言したObject集合を差分同期する
+        void BeginProgramObjectSynchronization();
+        void RecordProgramObjectDeclaration(
+            SceneID sceneID,
+            ObjectID objectID,
+            bool created
+        );
+        void CommitProgramObjectSynchronization();
+        void CancelProgramObjectSynchronization();
+
     private:
         Scene* ResolveScene(SceneID sceneID);
         const Scene* ResolveScene(SceneID sceneID) const;
         bool DeleteObject(SceneID sceneID, ObjectID objectID);
         bool DeleteComponent(SceneID sceneID, ComponentID componentID);
         void IncrementRevision();
+        static std::uint64_t MakeProgramObjectKey(SceneID sceneID, ObjectID objectID);
 
         GameApp& Application; //描画、Scene、Object APIの所有元
         ScriptRegistry Scripts; //NativeとDLL Script Factory Registry
         ScriptModuleManager Modules; //DLL Handleと関数表の寿命管理器
         ExtensionModuleManager Extensions; //Program DLL Hot Reloadと外部API管理器
         std::uint64_t Revision; //Editor構造変更番号
+        std::unordered_set<std::uint64_t> KnownProgramObjects; //過去にProgramが作成した再利用可能Object
+        std::unordered_set<std::uint64_t> ManagedProgramObjects; //前世代が宣言したObject
+        std::unordered_set<std::uint64_t> PendingProgramObjects; //新世代が宣言したObject
+        std::unordered_set<std::uint64_t> PendingCreatedProgramObjects; //同期中に新規作成したObject
+        bool ProgramObjectSynchronizationActive = false; //宣言収集中の場合true
     };
 }

@@ -33,6 +33,7 @@
 #include <string_view>
 #include <cstring>
 #include <d3dcompiler.h>
+#include <cmath>
 
 #pragma comment(lib, "d3dcompiler.lib")
 
@@ -271,7 +272,10 @@ float4 PSMain(VSOutput input) : SV_TARGET
         return gTexture.Sample(gSampler, input.uv) * gColor;
     }
 
-    return gColor;
+    float lengthSquared = dot(input.normal, input.normal);
+    float lighting = lengthSquared > 0.000001
+        ? 0.3 + 0.7 * abs(dot(normalize(input.normal), normalize(float3(0.4, 0.8, -0.6)))) : 0.8;
+    return float4(gColor.rgb * lighting, gColor.a);
 }
 
 )"; //OBJ Model描画用HLSL Source
@@ -513,7 +517,9 @@ float4 PSMain(VSOutput input) : SV_TARGET
             {
                 DirectX::XMFLOAT3 Position{}; //読み込んだPosition
 
-                if (!(Stream >> Position.x >> Position.y >> Position.z))
+                if (!(Stream >> Position.x >> Position.y >> Position.z) ||
+                    !std::isfinite(Position.x) || !std::isfinite(Position.y) || !std::isfinite(Position.z) ||
+                    std::abs(Position.x) > 1e10f || std::abs(Position.y) > 1e10f || std::abs(Position.z) > 1e10f)
                 {
                     return ReportParseFailure("position requires three finite numbers");
                 }
@@ -1116,6 +1122,43 @@ float4 PSMain(VSOutput input) : SV_TARGET
     //引数: renderContext 描画基盤とCameraを持つContext
     void OBJModel::Draw(const RenderContext& renderContext)
     {
+        DrawWithTransform(renderContext, GetWorldMatrix());
+    }
+
+    bool OBJModel::SetTexture(DirectX12& dx12, const std::wstring& path)
+    {
+        if (dx12.IsFrameOpen() || !dx12.WaitGPU()) return false;
+        Texture2D Candidate;
+        if (!Candidate.LoadFromFile(dx12, path)) return false;
+        Texture.Swap(Candidate);
+        SourceTexturePath = path;
+        TextureRequested = UseTexture = true;
+        Color = { 1, 1, 1, 1 };
+        return true;
+    }
+
+    void OBJModel::GetBounds(DirectX::XMFLOAT3& center, float& radius) const
+    {
+        if (Vertices.empty()) { center = {}; radius = 1; return; }
+        auto low = Vertices.front().Position, high = low;
+        for (const auto& vertex : Vertices)
+        {
+            low.x = std::min(low.x, vertex.Position.x); high.x = std::max(high.x, vertex.Position.x);
+            low.y = std::min(low.y, vertex.Position.y); high.y = std::max(high.y, vertex.Position.y);
+            low.z = std::min(low.z, vertex.Position.z); high.z = std::max(high.z, vertex.Position.z);
+        }
+        center = { (low.x + high.x) * 0.5f, (low.y + high.y) * 0.5f, (low.z + high.z) * 0.5f };
+        radius = 0;
+        for (const auto& vertex : Vertices)
+        {
+            const auto d = DirectX::XMVectorSubtract(DirectX::XMLoadFloat3(&vertex.Position), DirectX::XMLoadFloat3(&center));
+            radius = std::max(radius, DirectX::XMVectorGetX(DirectX::XMVector3Length(d)));
+        }
+        radius = std::max(0.001f, radius);
+    }
+
+    void OBJModel::DrawWithTransform(const RenderContext& renderContext, const DirectX::XMMATRIX& world)
+    {
         if (!PipelineState)
             return;
 
@@ -1138,7 +1181,7 @@ float4 PSMain(VSOutput input) : SV_TARGET
         using namespace DirectX;
 
         XMMATRIX World =
-            GetWorldMatrix(); //Owner ObjectのWorld行列
+            world; //Preview又はOwner ObjectのWorld行列
 
         XMMATRIX ViewProjection =
             ViewCamera.GetViewProjectionMatrix(); //現在CameraのViewProjection行列

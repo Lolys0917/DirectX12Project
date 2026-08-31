@@ -59,6 +59,22 @@ struct EngineScriptDescriptor final
     void(ENGINE_SCRIPT_CALL* OnUpdate)(void* instance, float deltaTime); //毎Frame更新関数
     void(ENGINE_SCRIPT_CALL* OnStop)(void* instance); //実行終了関数
     void(ENGINE_SCRIPT_CALL* OnDetach)(void* instance); //所有Objectからの切断関数
+
+    //Sizeで存在確認する追記専用の公開変数／関数Reflection API。
+    std::uint32_t(ENGINE_SCRIPT_CALL* GetExposedMemberCount)(void* instance);
+    bool(ENGINE_SCRIPT_CALL* GetExposedMemberInfo)(void* instance, std::uint32_t index, struct EngineScriptExposedMemberInfo* information);
+    bool(ENGINE_SCRIPT_CALL* SetExposedMember)(void* instance, const char* name, const char* value);
+    bool(ENGINE_SCRIPT_CALL* InvokeExposedFunction)(void* instance, const char* name);
+};
+
+struct EngineScriptExposedMemberInfo final
+{
+    std::uint32_t Size;
+    bool Function;
+    bool ReadOnly;
+    char Name[128];
+    char Type[64];
+    char Value[256];
 };
 
 struct EngineScriptModuleDescriptor final

@@ -15,8 +15,14 @@
 #include "ScriptModuleAPI.h"
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <functional>
 #include <new>
+#include <string>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace EngineGame
 {
@@ -211,7 +217,17 @@ namespace EngineGame
     class ObjectScript
     {
     private:
+        enum class PublicType { Float, Integer, Boolean, Vector3, Color, String, Function };
+        struct PublicBinding final
+        {
+            std::string Name;
+            PublicType Type = PublicType::Float;
+            void* Value = nullptr;
+            std::function<void()> Function;
+            bool ReadOnly = false;
+        };
         const EngineScriptHostAPI* Host; //従来の詳細操作を保持する低水準Host API
+        std::vector<PublicBinding> PublicBindings;
 
     public:
         PositionProperty Position; //this->Position形式で扱うTransform Property
@@ -231,6 +247,104 @@ namespace EngineGame
         //引数：なし
         //戻り値：なし
         ~ObjectScript() = default;
+
+        void ExposeVariable(const std::string& name, float& value, bool readOnly = false)
+        { PublicBindings.push_back({ name, PublicType::Float, &value, {}, readOnly }); }
+        void ExposeVariable(const std::string& name, std::int32_t& value, bool readOnly = false)
+        { PublicBindings.push_back({ name, PublicType::Integer, &value, {}, readOnly }); }
+        void ExposeVariable(const std::string& name, bool& value, bool readOnly = false)
+        { PublicBindings.push_back({ name, PublicType::Boolean, &value, {}, readOnly }); }
+        void ExposeVariable(const std::string& name, Float3& value, bool readOnly = false)
+        { PublicBindings.push_back({ name, PublicType::Vector3, &value, {}, readOnly }); }
+        void ExposeVariable(const std::string& name, Color4& value, bool readOnly = false)
+        { PublicBindings.push_back({ name, PublicType::Color, &value, {}, readOnly }); }
+        void ExposeVariable(const std::string& name, std::string& value, bool readOnly = false)
+        { PublicBindings.push_back({ name, PublicType::String, &value, {}, readOnly }); }
+        void ExposeFunction(const std::string& name, std::function<void()> function)
+        { PublicBindings.push_back({ name, PublicType::Function, nullptr, std::move(function), false }); }
+
+        std::uint32_t GetExposedMemberCount() const
+        { return static_cast<std::uint32_t>(PublicBindings.size()); }
+
+        bool GetExposedMemberInfo(
+            std::uint32_t index,
+            EngineScriptExposedMemberInfo& information
+        ) const
+        {
+            if (index >= PublicBindings.size()) return false;
+            const PublicBinding& Binding = PublicBindings[index];
+            information = EngineScriptExposedMemberInfo{};
+            information.Size = sizeof(EngineScriptExposedMemberInfo);
+            information.Function = Binding.Type == PublicType::Function;
+            information.ReadOnly = Binding.ReadOnly;
+            std::snprintf(information.Name, sizeof(information.Name), "%s", Binding.Name.c_str());
+            const char* TypeName = "Float";
+            std::string Value;
+            char Buffer[256]{};
+            switch (Binding.Type)
+            {
+            case PublicType::Float:
+                std::snprintf(Buffer, sizeof(Buffer), "%g", *static_cast<float*>(Binding.Value)); break;
+            case PublicType::Integer:
+                TypeName = "Integer"; std::snprintf(Buffer, sizeof(Buffer), "%d", *static_cast<std::int32_t*>(Binding.Value)); break;
+            case PublicType::Boolean:
+                TypeName = "Bool"; std::snprintf(Buffer, sizeof(Buffer), "%s", *static_cast<bool*>(Binding.Value) ? "true" : "false"); break;
+            case PublicType::Vector3:
+            {
+                TypeName = "Vector3"; const Float3& V = *static_cast<Float3*>(Binding.Value);
+                std::snprintf(Buffer, sizeof(Buffer), "%g,%g,%g", V.X, V.Y, V.Z); break;
+            }
+            case PublicType::Color:
+            {
+                TypeName = "Color"; const Color4& V = *static_cast<Color4*>(Binding.Value);
+                std::snprintf(Buffer, sizeof(Buffer), "%g,%g,%g,%g", V.Red, V.Green, V.Blue, V.Alpha); break;
+            }
+            case PublicType::String:
+                TypeName = "String"; std::snprintf(Buffer, sizeof(Buffer), "%s", static_cast<std::string*>(Binding.Value)->c_str()); break;
+            case PublicType::Function:
+                TypeName = "Action"; break;
+            }
+            std::snprintf(information.Type, sizeof(information.Type), "%s", TypeName);
+            std::snprintf(information.Value, sizeof(information.Value), "%s", Buffer);
+            return true;
+        }
+
+        bool SetExposedMember(const std::string& name, const std::string& value)
+        {
+            for (PublicBinding& Binding : PublicBindings)
+            {
+                if (Binding.Name != name || Binding.ReadOnly || Binding.Type == PublicType::Function) continue;
+                switch (Binding.Type)
+                {
+                case PublicType::Float: *static_cast<float*>(Binding.Value) = std::strtof(value.c_str(), nullptr); return true;
+                case PublicType::Integer: *static_cast<std::int32_t*>(Binding.Value) = static_cast<std::int32_t>(std::strtol(value.c_str(), nullptr, 10)); return true;
+                case PublicType::Boolean: *static_cast<bool*>(Binding.Value) = value == "true" || value == "1"; return true;
+                case PublicType::Vector3:
+                {
+                    Float3& V = *static_cast<Float3*>(Binding.Value);
+                    return ::sscanf_s(value.c_str(), "%f,%f,%f", &V.X, &V.Y, &V.Z) == 3;
+                }
+                case PublicType::Color:
+                {
+                    Color4& V = *static_cast<Color4*>(Binding.Value);
+                    return ::sscanf_s(value.c_str(), "%f,%f,%f,%f", &V.Red, &V.Green, &V.Blue, &V.Alpha) == 4;
+                }
+                case PublicType::String: *static_cast<std::string*>(Binding.Value) = value; return true;
+                default: return false;
+                }
+            }
+            return false;
+        }
+
+        bool InvokeExposedFunction(const std::string& name)
+        {
+            for (PublicBinding& Binding : PublicBindings)
+            {
+                if (Binding.Name == name && Binding.Type == PublicType::Function && Binding.Function)
+                { Binding.Function(); return true; }
+            }
+            return false;
+        }
 
         //概要：指定Keyboard Keyが現在押されているか取得する
         //引数：key=GameKeyで指定するKey
@@ -481,6 +595,48 @@ namespace EngineGame
         }
     }
 
+    template<class ScriptType>
+    std::uint32_t ENGINE_SCRIPT_CALL GetObjectScriptExposedMemberCount(void* instance)
+    {
+        auto* Script = static_cast<ScriptType*>(instance);
+        return Script == nullptr ? 0u : Script->GetExposedMemberCount();
+    }
+
+    template<class ScriptType>
+    bool ENGINE_SCRIPT_CALL GetObjectScriptExposedMemberInfo(
+        void* instance,
+        std::uint32_t index,
+        EngineScriptExposedMemberInfo* information
+    )
+    {
+        auto* Script = static_cast<ScriptType*>(instance);
+        return Script != nullptr && information != nullptr &&
+            Script->GetExposedMemberInfo(index, *information);
+    }
+
+    template<class ScriptType>
+    bool ENGINE_SCRIPT_CALL SetObjectScriptExposedMember(
+        void* instance,
+        const char* name,
+        const char* value
+    )
+    {
+        auto* Script = static_cast<ScriptType*>(instance);
+        return Script != nullptr && name != nullptr && value != nullptr &&
+            Script->SetExposedMember(name, value);
+    }
+
+    template<class ScriptType>
+    bool ENGINE_SCRIPT_CALL InvokeObjectScriptExposedFunction(
+        void* instance,
+        const char* name
+    )
+    {
+        auto* Script = static_cast<ScriptType*>(instance);
+        return Script != nullptr && name != nullptr &&
+            Script->InvokeExposedFunction(name);
+    }
+
     //概要：Game Script型からEngine登録用の低水準Descriptorを作成する
     //引数：typeKey=Module内一意Key、displayName=Editor表示名
     //戻り値：EngineScriptDescriptor関数表
@@ -502,7 +658,11 @@ namespace EngineGame
             StartObjectScript<ScriptType>,
             UpdateObjectScript<ScriptType>,
             StopObjectScript<ScriptType>,
-            DetachObjectScript<ScriptType>
+            DetachObjectScript<ScriptType>,
+            GetObjectScriptExposedMemberCount<ScriptType>,
+            GetObjectScriptExposedMemberInfo<ScriptType>,
+            SetObjectScriptExposedMember<ScriptType>,
+            InvokeObjectScriptExposedFunction<ScriptType>
         };
     }
 }

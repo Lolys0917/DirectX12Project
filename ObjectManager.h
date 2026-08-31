@@ -153,6 +153,17 @@ namespace Engine
             const std::string& requestedName
         );
 
+        //ObjectのGroup、Tag、Layer、処理順を設定する。同名GroupのGroup順は一括変更する。
+        bool SetObjectOrganization(
+            ObjectID objectID,
+            const std::string& group,
+            const std::string& tag,
+            std::uint32_t layer,
+            std::int32_t groupOrder,
+            std::int32_t executionOrder
+        );
+        std::size_t SetGroupActive(const std::string& group, bool active);
+
         //Object IDから走査せず登録Objectを取得する
         //引数: objectID 検索するObject ID
         //戻り値: 登録Object、無効または削除済みIDの場合はnullptr
@@ -291,6 +302,7 @@ namespace Engine
         static bool IsValidComponentType(ComponentType componentType);
 
         void RemoveChildReference(Object& parent, ObjectID childID);
+        static bool ComesBefore(const Object& left, const Object& right);
 
         std::vector<std::unique_ptr<Object>> ObjectsByID; //ObjectIDを直接slotに使う所有配列
         std::vector<bool> RenderableObjectInitializedByID; //ObjectIDごとの描画Resource初期化状態

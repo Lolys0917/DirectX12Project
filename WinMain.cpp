@@ -109,6 +109,46 @@ namespace
         window.UpdateLogMessages(DisplayMessages);
         displayedRevision = Snapshot.Revision;
     }
+
+    //起動失敗時にDirectX、Scene、Windowの具体的なErrorログをDialogへまとめる
+    std::wstring BuildStartupFailureMessage()
+    {
+        const Engine::MessageLogSnapshot Snapshot =
+            Engine::MessageLog::GetInstance().GetSnapshot();
+        std::vector<std::string> Failures;
+
+        const auto CollectFailures = [&Failures](const std::vector<std::string>& messages)
+        {
+            for (const std::string& Message : messages)
+            {
+                if (Message.find("[Error]") != std::string::npos ||
+                    Message.find("[Critical]") != std::string::npos)
+                {
+                    Failures.emplace_back(Message);
+                }
+            }
+        };
+        CollectFailures(Snapshot.PermanentLogs);
+        CollectFailures(Snapshot.Logs);
+
+        std::wstring Result = L"エンジンの起動初期化に失敗しました。";
+        if (Failures.empty())
+        {
+            Result += L"\n詳細ログは取得できませんでした。";
+            return Result;
+        }
+
+        Result += L"\n\n失敗箇所:\n";
+        constexpr std::size_t MaximumDisplayedFailures = 8;
+        const std::size_t First = Failures.size() > MaximumDisplayedFailures
+            ? Failures.size() - MaximumDisplayedFailures
+            : 0;
+        for (std::size_t Index = First; Index < Failures.size(); ++Index)
+        {
+            Result += L"・" + ConvertLogToWide(Failures[Index]) + L"\n";
+        }
+        return Result;
+    }
 }
 
 //Windows標準Editor UIとEngineを起動してMessage Loopを実行する
@@ -200,14 +240,16 @@ int WINAPI WinMain(
         Window.GetRenderHwnd(),
         Window.GetRenderWidth(),
         Window.GetRenderHeight(),
-        Window.GetTargetFrameRate()))
+        Window.GetTargetFrameRate(),
+        Window.GetPreviewHwnd()))
     {
         Log.AddPermanentLog(
-            "[Critical] WinMain | DirectX 12 or DefaultScene initialization failed."
+            "[Critical] WinMain | Engine startup initialization failed."
         );
+        const std::wstring FailureMessage = BuildStartupFailureMessage();
         MessageBoxW(
             Window.GetHWND(),
-            L"DirectX 12または既定Sceneの初期化に失敗しました。",
+            FailureMessage.c_str(),
             L"DirectX 12 Engine",
             MB_OK | MB_ICONERROR
         );

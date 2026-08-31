@@ -150,6 +150,24 @@ namespace Engine
         return Started;
     }
 
+    std::vector<ScriptExposedMember> Script::GetExposedMembers() const
+    {
+        return {};
+    }
+
+    bool Script::SetExposedMember(const std::string& name, const std::string& value)
+    {
+        (void)name;
+        (void)value;
+        return false;
+    }
+
+    bool Script::InvokeExposedFunction(const std::string& name)
+    {
+        (void)name;
+        return false;
+    }
+
     //概要：基底Scriptの接続処理を成功として扱う
     //引数：なし
     //戻り値：常にtrue

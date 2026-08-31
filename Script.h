@@ -14,11 +14,21 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "Component.h"
 
 namespace Engine
 {
+    struct ScriptExposedMember final
+    {
+        std::string Name;
+        std::string Type;
+        std::string Value;
+        bool Function = false;
+        bool ReadOnly = false;
+    };
+
     class Script : public Component
     {
     public:
@@ -34,6 +44,9 @@ namespace Engine
         const std::string& GetDisplayName() const;
         bool IsAttached() const;
         bool HasStarted() const;
+        virtual std::vector<ScriptExposedMember> GetExposedMembers() const;
+        virtual bool SetExposedMember(const std::string& name, const std::string& value);
+        virtual bool InvokeExposedFunction(const std::string& name);
 
     protected:
         explicit Script(

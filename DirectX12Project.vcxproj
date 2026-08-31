@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -143,6 +143,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="DDSImage.h" />
+    <ClInclude Include="PlaybackSettings.h" />
+    <ClInclude Include="TextureDisplay.h" />
+    <ClInclude Include="AssetPreview.h" />
     <ClInclude Include="Box.h" />
     <ClInclude Include="Camera.h" />
     <ClInclude Include="Capsule.h" />
@@ -171,6 +175,7 @@
     <ClInclude Include="HalfSphere.h" />
     <ClInclude Include="IRenderable.h" />
     <ClInclude Include="MainScene.h" />
+    <ClInclude Include="NativeScripts.h" />
     <ClInclude Include="MeshComponent.h" />
     <ClInclude Include="MessageLog.h" />
     <ClInclude Include="Model.h" />
@@ -200,6 +205,10 @@
     <ClInclude Include="WindowsUIResources.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="DDSImage.cpp" />
+    <ClCompile Include="TextureDisplay.cpp" />
+    <ClCompile Include="AssetPreview.cpp" />
+    <ClCompile Include="WinAppAssets.cpp" />
     <ClCompile Include="Box.cpp" />
     <ClCompile Include="Camera.cpp" />
     <ClCompile Include="Capsule.cpp" />
@@ -218,6 +227,7 @@
     <ClCompile Include="Grid.cpp" />
     <ClCompile Include="HalfSphere.cpp" />
     <ClCompile Include="MainScene.cpp" />
+    <ClCompile Include="NativeScripts.cpp" />
     <ClCompile Include="MeshComponent.cpp" />
     <ClCompile Include="MessageLog.cpp" />
     <ClCompile Include="Model.cpp" />

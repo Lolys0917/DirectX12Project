@@ -108,6 +108,10 @@ namespace Engine
             decltype(EngineScriptDescriptor::OnUpdate) Update = nullptr; //毎Frame更新関数
             decltype(EngineScriptDescriptor::OnStop) Stop = nullptr; //停止通知関数
             decltype(EngineScriptDescriptor::OnDetach) Detach = nullptr; //切断通知関数
+            decltype(EngineScriptDescriptor::GetExposedMemberCount) GetMemberCount = nullptr;
+            decltype(EngineScriptDescriptor::GetExposedMemberInfo) GetMemberInfo = nullptr;
+            decltype(EngineScriptDescriptor::SetExposedMember) SetMember = nullptr;
+            decltype(EngineScriptDescriptor::InvokeExposedFunction) InvokeFunction = nullptr;
         };
 
         struct DynamicScriptHostContext final
@@ -404,6 +408,9 @@ namespace Engine
                 std::size_t descriptorIndex
             );
             ~DynamicScript() override;
+            std::vector<ScriptExposedMember> GetExposedMembers() const override;
+            bool SetExposedMember(const std::string& name, const std::string& value) override;
+            bool InvokeExposedFunction(const std::string& name) override;
 
         protected:
             std::unique_ptr<Script> CloneScript() const override;
@@ -471,6 +478,50 @@ namespace Engine
         //引数：なし
         //戻り値：なし
         DynamicScript::~DynamicScript() = default;
+
+        std::vector<ScriptExposedMember> DynamicScript::GetExposedMembers() const
+        {
+            std::vector<ScriptExposedMember> Result;
+            const DynamicScriptDescriptor* Descriptor = GetDescriptor();
+            if (Descriptor == nullptr || Instance == nullptr ||
+                Descriptor->GetMemberCount == nullptr || Descriptor->GetMemberInfo == nullptr)
+            {
+                return Result;
+            }
+            const std::uint32_t Count = Descriptor->GetMemberCount(Instance);
+            Result.reserve(Count);
+            for (std::uint32_t Index = 0; Index < Count; ++Index)
+            {
+                EngineScriptExposedMemberInfo Information{};
+                Information.Size = sizeof(Information);
+                if (Descriptor->GetMemberInfo(Instance, Index, &Information))
+                {
+                    Result.push_back({
+                        Information.Name,
+                        Information.Type,
+                        Information.Value,
+                        Information.Function,
+                        Information.ReadOnly
+                    });
+                }
+            }
+            return Result;
+        }
+
+        bool DynamicScript::SetExposedMember(const std::string& name, const std::string& value)
+        {
+            const DynamicScriptDescriptor* Descriptor = GetDescriptor();
+            return Descriptor != nullptr && Instance != nullptr && Descriptor->SetMember != nullptr &&
+                Descriptor->SetMember(Instance, name.c_str(), value.c_str());
+        }
+
+        bool DynamicScript::InvokeExposedFunction(const std::string& name)
+        {
+            const DynamicScriptDescriptor* Descriptor = GetDescriptor();
+            return Descriptor != nullptr && Instance != nullptr &&
+                Descriptor->InvokeFunction != nullptr &&
+                Descriptor->InvokeFunction(Instance, name.c_str());
+        }
 
         //概要：同じModule関数表を参照する未登録Script定義を複製する
         //引数：なし
@@ -717,7 +768,7 @@ namespace Engine
     {
         const std::wstring NormalizedPath = NormalizePath(path); //比較とLoadに使う絶対Path
 
-        if (NormalizedPath.empty() || IsLoaded(NormalizedPath))
+        if (NormalizedPath.empty())
         {
             return false;
         }
@@ -774,7 +825,9 @@ namespace Engine
         {
             const EngineScriptDescriptor& SourceScript = Source->Scripts[Index]; //検証するDLL Script関数表
 
-            if (SourceScript.Size < sizeof(EngineScriptDescriptor) ||
+            constexpr std::size_t RequiredScriptDescriptorSize =
+                offsetof(EngineScriptDescriptor, GetExposedMemberCount);
+            if (SourceScript.Size < RequiredScriptDescriptorSize ||
                 SourceScript.TypeKey == nullptr || SourceScript.DisplayName == nullptr ||
                 SourceScript.Create == nullptr || SourceScript.Destroy == nullptr ||
                 SourceScript.OnUpdate == nullptr)
@@ -795,6 +848,16 @@ namespace Engine
             Descriptor.Update = SourceScript.OnUpdate;
             Descriptor.Stop = SourceScript.OnStop;
             Descriptor.Detach = SourceScript.OnDetach;
+            constexpr std::size_t ReflectionDescriptorSize =
+                offsetof(EngineScriptDescriptor, InvokeExposedFunction) +
+                sizeof(decltype(EngineScriptDescriptor::InvokeExposedFunction));
+            if (SourceScript.Size >= ReflectionDescriptorSize)
+            {
+                Descriptor.GetMemberCount = SourceScript.GetExposedMemberCount;
+                Descriptor.GetMemberInfo = SourceScript.GetExposedMemberInfo;
+                Descriptor.SetMember = SourceScript.SetExposedMember;
+                Descriptor.InvokeFunction = SourceScript.InvokeExposedFunction;
+            }
             Module->Scripts.emplace_back(std::move(Descriptor));
         }
 

@@ -543,6 +543,58 @@ namespace Engine
         return ObjectsByID[objectID.GetValue()].get();
     }
 
+    //Object分類とScheduler順を更新し、同名GroupのGroup順を一貫させる
+    bool ObjectManager::SetObjectOrganization(
+        ObjectID objectID,
+        const std::string& group,
+        const std::string& tag,
+        std::uint32_t layer,
+        std::int32_t groupOrder,
+        std::int32_t executionOrder
+    )
+    {
+        Object* Target = FindObject(objectID);
+
+        if (Target == nullptr)
+        {
+            return false;
+        }
+
+        Target->ProcessingGroup = group;
+        Target->Tag = tag.empty() ? "Untagged" : tag;
+        Target->Layer = layer < 32u ? layer : 31u;
+        Target->GroupOrder = groupOrder;
+        Target->ExecutionOrder = executionOrder;
+
+        if (!group.empty())
+        {
+            for (const std::unique_ptr<Object>& Candidate : ObjectsByID)
+            {
+                if (Candidate != nullptr && Candidate->ProcessingGroup == group)
+                {
+                    Candidate->GroupOrder = groupOrder;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    std::size_t ObjectManager::SetGroupActive(const std::string& group, bool active)
+    {
+        if (group.empty()) return 0;
+        std::size_t Changed = 0;
+        for (const std::unique_ptr<Object>& Candidate : ObjectsByID)
+        {
+            if (Candidate != nullptr && Candidate->ProcessingGroup == group)
+            {
+                Candidate->Active = active;
+                ++Changed;
+            }
+        }
+        return Changed;
+    }
+
     //Scene内で一意な解決済み名からObjectを平均O(1)で検索する
     //引数: resolvedName 解決済み名
     //戻り値: 見つかったObject、未登録時はnullptr
@@ -834,32 +886,69 @@ namespace Engine
     //引数: deltaTime 前回更新からの秒数
     void ObjectManager::UpdateComponents(float deltaTime)
     {
-        for (std::size_t Index = 1; Index < ObjectsByID.size(); ++Index) //更新対象のRenderable Object Slot
+        std::vector<Object*> ScheduledObjects; //GroupとObject順を解決済みの更新対象
+        ScheduledObjects.reserve(ObjectCount);
+
+        for (std::size_t Index = 1; Index < ObjectsByID.size(); ++Index)
         {
-            Object* TargetObject = ObjectsByID[Index].get(); //現在更新するObject
+            Object* TargetObject = ObjectsByID[Index].get();
 
-            if (!TargetObject || !TargetObject->Active ||
-                !RenderableObjectInitializedByID[Index])
+            if (TargetObject != nullptr && TargetObject->Active)
             {
-                continue;
-            }
-
-            if (IRenderable* Renderable = dynamic_cast<IRenderable*>(TargetObject)) //Object描画契約
-            {
-                Renderable->Update(deltaTime);
+                ScheduledObjects.push_back(TargetObject);
             }
         }
 
-        for (std::size_t Index = 1; Index < ComponentsByID.size(); ++Index) //更新対象を確認するComponent ID Slot
-        {
-            Component* Target = ComponentsByID[Index].Pointer; //現在更新するComponent
-
-            if (!Target || !Target->Initialized || !Target->Active ||
-                !Target->Owner || !Target->Owner->Active)
+        std::stable_sort(
+            ScheduledObjects.begin(),
+            ScheduledObjects.end(),
+            [](const Object* Left, const Object* Right)
             {
-                continue;
+                return ComesBefore(*Left, *Right);
             }
+        );
 
+        for (Object* TargetObject : ScheduledObjects)
+        {
+            const std::size_t Index = TargetObject->ID.GetValue();
+
+            if (Index < RenderableObjectInitializedByID.size() &&
+                RenderableObjectInitializedByID[Index])
+            {
+                if (IRenderable* Renderable = dynamic_cast<IRenderable*>(TargetObject))
+                {
+                    Renderable->Update(deltaTime);
+                }
+            }
+        }
+
+        std::vector<Component*> ScheduledComponents; //既存Component列をOwnerのGroup順で安定整列
+        ScheduledComponents.reserve(ComponentCount);
+        for (std::size_t Index = 1; Index < ComponentsByID.size(); ++Index)
+        {
+            Component* Target = ComponentsByID[Index].Pointer;
+            if (Target != nullptr && Target->Initialized && Target->Active &&
+                Target->Owner != nullptr && Target->Owner->Active)
+            {
+                ScheduledComponents.push_back(Target);
+            }
+        }
+
+        std::stable_sort(
+            ScheduledComponents.begin(),
+            ScheduledComponents.end(),
+            [](const Component* Left, const Component* Right)
+            {
+                if (Left->GetOwner() != Right->GetOwner())
+                {
+                    return ComesBefore(*Left->GetOwner(), *Right->GetOwner());
+                }
+                return Left->GetID().GetValue() < Right->GetID().GetValue();
+            }
+        );
+
+        for (Component* Target : ScheduledComponents)
+        {
             Target->Update(deltaTime);
         }
     }
@@ -868,32 +957,68 @@ namespace Engine
     //引数: renderContext 描画基盤とCameraを持つContext
     void ObjectManager::DrawComponents(const RenderContext& renderContext)
     {
-        for (std::size_t Index = 1; Index < ObjectsByID.size(); ++Index) //描画対象のRenderable Object Slot
+        std::vector<Object*> ScheduledObjects;
+        ScheduledObjects.reserve(ObjectCount);
+
+        for (std::size_t Index = 1; Index < ObjectsByID.size(); ++Index)
         {
-            Object* TargetObject = ObjectsByID[Index].get(); //現在描画するObject
-
-            if (!TargetObject || !TargetObject->Active ||
-                !RenderableObjectInitializedByID[Index])
+            Object* TargetObject = ObjectsByID[Index].get();
+            if (TargetObject != nullptr && TargetObject->Active)
             {
-                continue;
-            }
-
-            if (IRenderable* Renderable = dynamic_cast<IRenderable*>(TargetObject)) //Object描画契約
-            {
-                Renderable->Draw(renderContext);
+                ScheduledObjects.push_back(TargetObject);
             }
         }
 
-        for (std::size_t Index = 1; Index < ComponentsByID.size(); ++Index) //描画対象を確認するComponent ID Slot
-        {
-            Component* Target = ComponentsByID[Index].Pointer; //現在描画するComponent
-
-            if (!Target || !Target->Initialized || !Target->Active ||
-                !Target->Owner || !Target->Owner->Active)
+        std::stable_sort(
+            ScheduledObjects.begin(),
+            ScheduledObjects.end(),
+            [](const Object* Left, const Object* Right)
             {
-                continue;
+                return ComesBefore(*Left, *Right);
             }
+        );
 
+        for (Object* TargetObject : ScheduledObjects)
+        {
+            const std::size_t Index = TargetObject->ID.GetValue();
+
+            if (Index < RenderableObjectInitializedByID.size() &&
+                RenderableObjectInitializedByID[Index])
+            {
+                if (IRenderable* Renderable = dynamic_cast<IRenderable*>(TargetObject))
+                {
+                    Renderable->Draw(renderContext);
+                }
+            }
+        }
+
+        std::vector<Component*> ScheduledComponents;
+        ScheduledComponents.reserve(ComponentCount);
+        for (std::size_t Index = 1; Index < ComponentsByID.size(); ++Index)
+        {
+            Component* Target = ComponentsByID[Index].Pointer;
+            if (Target != nullptr && Target->Initialized && Target->Active &&
+                Target->Owner != nullptr && Target->Owner->Active)
+            {
+                ScheduledComponents.push_back(Target);
+            }
+        }
+
+        std::stable_sort(
+            ScheduledComponents.begin(),
+            ScheduledComponents.end(),
+            [](const Component* Left, const Component* Right)
+            {
+                if (Left->GetOwner() != Right->GetOwner())
+                {
+                    return ComesBefore(*Left->GetOwner(), *Right->GetOwner());
+                }
+                return Left->GetID().GetValue() < Right->GetID().GetValue();
+            }
+        );
+
+        for (Component* Target : ScheduledComponents)
+        {
             Target->Draw(renderContext);
         }
     }
@@ -1105,5 +1230,23 @@ namespace Engine
             std::remove(parent.Children.begin(), parent.Children.end(), childID),
             parent.Children.end()
         );
+    }
+
+    //Group順、Group名、Object順、安定IDの順に決定論的な処理順を作る
+    bool ObjectManager::ComesBefore(const Object& left, const Object& right)
+    {
+        if (left.GroupOrder != right.GroupOrder)
+        {
+            return left.GroupOrder < right.GroupOrder;
+        }
+        if (left.ProcessingGroup != right.ProcessingGroup)
+        {
+            return left.ProcessingGroup < right.ProcessingGroup;
+        }
+        if (left.ExecutionOrder != right.ExecutionOrder)
+        {
+            return left.ExecutionOrder < right.ExecutionOrder;
+        }
+        return left.ID.GetValue() < right.ID.GetValue();
     }
 }

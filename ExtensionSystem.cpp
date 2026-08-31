@@ -268,6 +268,11 @@ namespace Engine
             information->ComponentCount = static_cast<std::uint32_t>(NativeInformation.Components.size());
             information->Active = NativeInformation.Active;
             CopyExternalName(information->Name, std::size(information->Name), NativeInformation.Name);
+            CopyExternalName(information->Group, std::size(information->Group), NativeInformation.Group);
+            CopyExternalName(information->Tag, std::size(information->Tag), NativeInformation.Tag);
+            information->Layer = NativeInformation.Layer;
+            information->GroupOrder = NativeInformation.GroupOrder;
+            information->ExecutionOrder = NativeInformation.ExecutionOrder;
             information->LocalTransform.Position = {
                 NativeInformation.LocalTransform.Position.X,
                 NativeInformation.LocalTransform.Position.Y,
@@ -322,12 +327,17 @@ namespace Engine
                 return 0;
             }
 
-            Object* Created = GetEngine(context).CreateObject(
+            EngineAPI& API = GetEngine(context);
+            Object* Created = API.CreateObject(
                 SceneID(sceneID),
                 static_cast<ObjectType>(objectType),
                 name == nullptr ? std::string() : std::string(name),
                 ObjectID(parentObjectID)
             ); //Native側で作成したObject
+            if (Created != nullptr)
+            {
+                API.RecordProgramObjectDeclaration(SceneID(sceneID), Created->GetID(), true);
+            }
             return Created == nullptr ? 0 : Created->GetID().GetValue();
         }
 
@@ -524,6 +534,29 @@ namespace Engine
             );
         }
 
+        //外部ProgramからObjectのGroup、Tag、Layer及び処理順を設定する
+        bool ENGINE_EXTENSION_CALL SetExternalObjectOrganization(
+            void* context,
+            std::uint32_t sceneID,
+            std::uint32_t objectID,
+            const char* group,
+            const char* tag,
+            std::uint32_t layer,
+            std::int32_t groupOrder,
+            std::int32_t executionOrder
+        )
+        {
+            return GetEngine(context).SetObjectOrganization(
+                SceneID(sceneID),
+                ObjectID(objectID),
+                group == nullptr ? std::string() : std::string(group),
+                tag == nullptr ? std::string("Untagged") : std::string(tag),
+                layer,
+                groupOrder,
+                executionOrder
+            );
+        }
+
         //概要：外部Programから指定Componentを削除する
         //引数：context=Engine Context、sceneID=対象Scene、componentID=削除対象Component
         //戻り値：削除できた場合はtrue
@@ -679,11 +712,14 @@ namespace Engine
                 return 0;
             }
 
-            return GetEngine(context).FindObjectID(
+            EngineAPI& API = GetEngine(context);
+            const ObjectID Result = API.FindObjectID(
                 SceneID(sceneID),
                 static_cast<ObjectType>(objectType),
                 name
-            ).GetValue();
+            );
+            API.RecordProgramObjectDeclaration(SceneID(sceneID), Result, false);
+            return Result.GetValue();
         }
 
         //概要：外部ProgramからScene内で一意な解決済み名だけでObject IDを検索する
@@ -695,9 +731,14 @@ namespace Engine
             const char* name
         )
         {
-            return name == nullptr
-                ? 0
-                : GetEngine(context).FindObjectID(SceneID(sceneID), name).GetValue();
+            if (name == nullptr)
+            {
+                return 0;
+            }
+            EngineAPI& API = GetEngine(context);
+            const ObjectID Result = API.FindObjectID(SceneID(sceneID), name);
+            API.RecordProgramObjectDeclaration(SceneID(sceneID), Result, false);
+            return Result.GetValue();
         }
 
         //概要：外部Programから名前付きCapsule Modelを生成する
@@ -710,11 +751,16 @@ namespace Engine
             std::uint32_t parentObjectID
         )
         {
-            Capsule* Created = GetEngine(context).CreateCapsuleModel(
+            EngineAPI& API = GetEngine(context);
+            Capsule* Created = API.CreateCapsuleModel(
                 SceneID(sceneID),
                 name == nullptr ? std::string() : std::string(name),
                 ObjectID(parentObjectID)
             ); //Native APIで作成したCapsule
+            if (Created != nullptr)
+            {
+                API.RecordProgramObjectDeclaration(SceneID(sceneID), Created->GetID(), true);
+            }
             return Created == nullptr ? 0 : Created->GetID().GetValue();
         }
 
@@ -1125,6 +1171,7 @@ namespace Engine
         Host.SetObjectSizeByName = SetExternalObjectSizeByName;
         Host.GetObjectInfoByID = GetExternalObjectInfoByID;
         Host.GetComponentInfoByID = GetExternalComponentInfoByID;
+        Host.SetObjectOrganization = SetExternalObjectOrganization;
     }
 
     //概要：稼働中の外部Program Instanceを破棄してDLLを解放する
@@ -1191,10 +1238,12 @@ namespace Engine
         Candidate.Name = Candidate.Descriptor->ModuleName == nullptr
             ? modulePath.filename().string()
             : Candidate.Descriptor->ModuleName;
+        Engine.BeginProgramObjectSynchronization();
         Candidate.Instance = Candidate.Descriptor->Create(&Host);
 
         if (Candidate.Instance == nullptr)
         {
+            Engine.CancelProgramObjectSynchronization();
             ReleaseModule(Candidate);
             MessageLog::GetInstance().AddLog("[Error] Extension | Module instance creation failed; active module was preserved.");
             return false;
@@ -1230,6 +1279,8 @@ namespace Engine
             );
         }
 
+        Engine.CommitProgramObjectSynchronization();
+
         LoadedModule Previous = std::move(ActiveModule); //切替後に解放する旧Module
         ActiveModule = std::move(Candidate);
         ReleaseModule(Previous);
@@ -1243,6 +1294,11 @@ namespace Engine
     //戻り値：なし
     void ExtensionModuleManager::Unload()
     {
+        if (ActiveModule.Instance != nullptr)
+        {
+            Engine.BeginProgramObjectSynchronization();
+            Engine.CommitProgramObjectSynchronization();
+        }
         ReleaseModule(ActiveModule);
     }
 
@@ -1277,8 +1333,15 @@ namespace Engine
             return false;
         }
 
+        Engine.BeginProgramObjectSynchronization();
         ActiveModule.Instance = ActiveModule.Descriptor->Create(&Host);
-        return ActiveModule.Instance != nullptr;
+        if (ActiveModule.Instance == nullptr)
+        {
+            Engine.CancelProgramObjectSynchronization();
+            return false;
+        }
+        Engine.CommitProgramObjectSynchronization();
+        return true;
     }
 
     //概要：稼働中Moduleの毎Frame処理をNative固定更新上で実行する

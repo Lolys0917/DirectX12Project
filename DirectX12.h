@@ -21,10 +21,14 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <functional>
+#include <memory>
+#include <string>
 #include <wrl.h>
 
 namespace Engine
 {
+    class Camera;
+    class TextureDisplay;
     class DirectX12 final
     {
     public:
@@ -86,6 +90,8 @@ namespace Engine
         // CommandQueueに登録済みの全GPU処理が完了するまで待機する
         // 戻り値: GPU同期に成功した場合はtrue、失敗した場合はfalse
         bool WaitGPU();
+        bool SetSkyTexture(const std::wstring& path);
+        void DrawSky(const Camera& camera);
 
         // Deviceを参照する
         // 戻り値: 初期化済みDevice、未初期化の場合はnullptr
@@ -157,6 +163,7 @@ namespace Engine
         );
 
     private:
+        std::unique_ptr<TextureDisplay> SkyTexture;
         // DXGI Factoryを生成する
         // 戻り値: 生成に成功した場合はtrue、失敗した場合はfalse
         bool CreateFactory();

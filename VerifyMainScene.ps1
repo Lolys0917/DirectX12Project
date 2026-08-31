@@ -1,4 +1,4 @@
-Add-Type @"
+﻿Add-Type @"
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
@@ -252,14 +252,18 @@ try
     $ProgramSuggestionHandle = [NativeMainSceneVerification]::FindChildById($WindowHandle, 1041)
     $ProgramRoleHandle = [NativeMainSceneVerification]::FindChildById($WindowHandle, 1042)
     $RestoreProgramHandle = [NativeMainSceneVerification]::FindChildById($WindowHandle, 1043)
+    $AssetFileListHandle = [NativeMainSceneVerification]::FindChildById($WindowHandle, 1053)
+    $AssetEditorHandle = [NativeMainSceneVerification]::FindChildById($WindowHandle, 1054)
 
-    if ($EditorTabCount -ne 5 -or
+    if ($EditorTabCount -ne 8 -or
         $ProgramEditorHandle -eq [IntPtr]::Zero -or
         $CompileProgramHandle -eq [IntPtr]::Zero -or
         $ProgramStatusHandle -eq [IntPtr]::Zero -or
         $ProgramSuggestionHandle -eq [IntPtr]::Zero -or
         $ProgramRoleHandle -eq [IntPtr]::Zero -or
-        $RestoreProgramHandle -eq [IntPtr]::Zero)
+        $RestoreProgramHandle -eq [IntPtr]::Zero -or
+        $AssetFileListHandle -eq [IntPtr]::Zero -or
+        $AssetEditorHandle -eq [IntPtr]::Zero)
     {
         throw "Main or Script tab controls were not initialized."
     }

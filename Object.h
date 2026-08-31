@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <DirectXMath.h>
@@ -81,6 +82,18 @@ namespace Engine
         //引数：active=有効にする場合はtrue
         //戻り値：なし
         void SetActive(bool active) { Active = active; }
+
+        //Editor、Script、更新Schedulerが共有する分類情報を取得する
+        const std::string& GetTag() const { return Tag; }
+        std::uint32_t GetLayer() const { return Layer; }
+        const std::string& GetProcessingGroup() const { return ProcessingGroup; }
+        std::int32_t GetGroupOrder() const { return GroupOrder; }
+        std::int32_t GetExecutionOrder() const { return ExecutionOrder; }
+
+        //Object単位のTagとLayerを変更する
+        void SetTag(std::string tag) { Tag = std::move(tag); }
+        void SetLayer(std::uint32_t layer) { Layer = layer < 32u ? layer : 31u; }
+        void SetExecutionOrder(std::int32_t order) { ExecutionOrder = order; }
 
         //概要：ObjectのLocal座標を変更する
         //引数：position=設定するXYZ座標
@@ -209,6 +222,11 @@ namespace Engine
         ObjectType Type; //オブジェクト種別
         std::string Name; //同型内で一意な解決済み名
         bool Active; //更新と描画の対象にする場合true
+        std::string Tag; //検索及びGameplay分類に使用する任意Tag
+        std::uint32_t Layer; //描画、衝突、検索を分類する0から31のLayer
+        std::string ProcessingGroup; //空文字を非Groupとして扱う処理Group名
+        std::int32_t GroupOrder; //Group間の更新及び描画順
+        std::int32_t ExecutionOrder; //同一Group内のObject処理順
         Transform ObjectTransform; //必ず存在し削除できないLocal姿勢
         Object* Parent; //親Objectへの非所有参照、Rootの場合はnullptr
         std::vector<ObjectID> Children; //登録順の直接Child Object ID

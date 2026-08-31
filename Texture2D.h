@@ -65,6 +65,9 @@ namespace Engine
         //TextureとSRVが描画可能な状態か判定する
         //戻り値: TextureとSRVが存在する場合はtrue
         bool IsValid() const;
+        uint32_t GetWidth() const { return Width; }
+        uint32_t GetHeight() const { return Height; }
+        void Swap(Texture2D& other) noexcept;
 
     private:
         //RGBA8 Pixel列からUpload済みGPU Textureを作成する

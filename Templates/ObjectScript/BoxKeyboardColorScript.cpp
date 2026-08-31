@@ -17,7 +17,17 @@ namespace
             : ObjectScript(host)
             , Origin()
             , ElapsedTime(0.0f)
+            , Speed(2.0f)
+            , Distance(2.0f)
         {
+            ExposeVariable("Speed", Speed);
+            ExposeVariable("Distance", Distance);
+            ExposeVariable("Origin", Origin);
+            ExposeFunction("Reset", [this]()
+            {
+                ElapsedTime = 0.0f;
+                this->Position = Origin;
+            });
         }
 
         //概要：BoxだけにAttachを許可して初期位置と色を設定する
@@ -43,13 +53,15 @@ namespace
         {
             ElapsedTime += deltaTime;
             Float3 Next = Origin; //今回設定する座標
-            Next.x += std::sin(ElapsedTime * 2.0f) * 2.0f;
+            Next.x += std::sin(ElapsedTime * Speed) * Distance;
             this->Position = Next;
         }
 
     private:
         Float3 Origin; //Attach時の中心座標
         float ElapsedTime; //往復運動の経過秒数
+        float Speed; //Editorへ公開するSin波速度
+        float Distance; //Editorへ公開する移動距離
     };
 
     const EngineScriptDescriptor Scripts[] =

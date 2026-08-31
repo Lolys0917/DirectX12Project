@@ -15,6 +15,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="DDSImage.h" />
+    <ClInclude Include="PlaybackSettings.h" />
+    <ClInclude Include="TextureDisplay.h" />
+    <ClInclude Include="AssetPreview.h" />
     <ClInclude Include="Box.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
@@ -111,6 +115,9 @@
     <ClInclude Include="MainScene.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
+    <ClInclude Include="NativeScripts.h">
+      <Filter>ヘッダー ファイル</Filter>
+    </ClInclude>
     <ClInclude Include="MeshComponent.h">
       <Filter>ヘッダー ファイル</Filter>
     </ClInclude>
@@ -176,6 +183,10 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="DDSImage.cpp" />
+    <ClCompile Include="TextureDisplay.cpp" />
+    <ClCompile Include="AssetPreview.cpp" />
+    <ClCompile Include="WinAppAssets.cpp" />
     <ClCompile Include="Box.cpp">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
@@ -240,6 +251,9 @@
       <Filter>ソース ファイル</Filter>
     </ClCompile>
     <ClCompile Include="MainScene.cpp">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
+    <ClCompile Include="NativeScripts.cpp">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
     <ClCompile Include="MeshComponent.cpp">

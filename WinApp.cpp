@@ -1,4 +1,4 @@
-﻿//|| WinApp.cpp ||:::::::::::::::::::::::::::::
+//|| WinApp.cpp ||:::::::::::::::::::::::::::::
 //||
 //||  概要 ::::::::::::::::::::::::::::::::::::
 //||
@@ -86,6 +86,15 @@ namespace Engine
         constexpr int ProgramRoleControlId = 1042;       // Main又はScript役割説明Label ID
         constexpr int RestoreProgramControlId = 1043;    // 最終Compile成功Source復元Button ID
         constexpr int PauseControlId = 1044;             // 状態を保持する一時停止Button ID
+        constexpr int OrganizationEditControlBase = 1045; // Group、Tag、Layer、順序入力ID基点
+        constexpr int ScriptMemberListControlId = 1050; // Script公開項目一覧ID
+        constexpr int ScriptMemberValueControlId = 1051; // Script公開値入力ID
+        constexpr int ApplyScriptMemberControlId = 1052; // Script公開値適用又は関数呼出ID
+        constexpr int AssetFileListControlId = 1053;
+        constexpr int AssetEditorControlId = 1054;
+        constexpr int NewAssetControlId = 1055;
+        constexpr int SaveAssetControlId = 1056;
+        constexpr int DeleteAssetControlId = 1057;
         constexpr UINT_PTR ProgramEditorSubclassId = 5001; // RichEdit補完Subclass識別子
         constexpr UINT_PTR ProgramAutomationTimerId = 4001; // 自動保存とCompile監視Timer ID
         constexpr UINT ProgramAutomationTimerInterval = 200; // 自動処理確認間隔ms
@@ -100,6 +109,7 @@ namespace Engine
         constexpr UINT RefreshTreeMenuId = 2025;         // Tree再表示Menu ID
         constexpr UINT AddChildObjectMenuId = 2026;      // 子Object追加Menu ID
         constexpr UINT DetachParentMenuId = 2027;        // 親解除Menu ID
+        constexpr UINT ToggleGroupActiveMenuId = 2028;   // 選択ObjectのGroup一括有効切替
         constexpr UINT ScriptMenuBase = 3000;            // Script Factory Menu IDの基点
         constexpr uint32_t MinimumFrameRate = 1;        // 設定可能な最小FPS
         constexpr uint32_t MaximumFrameRate = 240;      // 設定可能な最大FPS
@@ -145,7 +155,8 @@ namespace Engine
             L"GetDeltaTime", L"GetSceneCount", L"GetSceneInfo", L"SetSceneActive",
             L"SetViewScene", L"GetObjectCount", L"GetObjectInfo", L"CreateObject",
             L"RemoveObject", L"RenameObject", L"SetObjectActive",
-            L"SetObjectTransform", L"SetObjectParent", L"GetComponentCount",
+            L"SetObjectTransform", L"SetObjectParent", L"SetObjectOrganization",
+            L"GetComponentCount",
             L"GetComponentInfo", L"RemoveComponent", L"RenameComponent",
             L"SetComponentActive", L"ModuleName", L"ModuleVersion", L"Create",
             L"Destroy", L"Update", L"GetStateSize", L"SaveState", L"LoadState",
@@ -164,6 +175,8 @@ namespace Engine
             L"GetObjectType", L"GetColor", L"SetColor", L"TypeKey",
             L"DisplayName", L"ScriptCount", L"Scripts", L"OnAttach",
             L"OnStart", L"OnUpdate", L"OnStop", L"OnDetach",
+            L"ExposeVariable", L"ExposeFunction", L"GetExposedMembers",
+            L"SetExposedMember", L"InvokeExposedFunction",
             L"GameKey", L"GameObjectType", L"Float3", L"Color4",
             L"ObjectScript", L"PositionProperty", L"ColorProperty",
             L"GetKeyPress", L"IsObjectType", L"Move", L"MoveWhenPressed",
@@ -175,6 +188,8 @@ namespace Engine
             L"SetSize", L"SetPosition", L"SetTransform", L"SetColor",
             L"CreateMany", L"CreateBoxes", L"CreateCapsules", L"ObjectHandle",
             L"ComponentHandle", L"Find", L"FindAll", L"FindByType",
+            L"FindByGroup", L"FindByTag", L"FindByLayer", L"SetOrganization",
+            L"GetGroup", L"GetTag", L"GetLayer",
             L"FindByComponent", L"FindByScript", L"GetComponent", L"GetComponents",
             L"HasComponent", L"GetID", L"GetName", L"GetType", L"IsValid",
             L"SetActive", L"Remove", L"Exists", L"AttachScript", L"Advanced",
@@ -346,7 +361,18 @@ namespace Engine
         , ObjectParentLabelHwnd(nullptr)
         , TransformLabelsHwnd{}
         , TransformEditsHwnd{}
+        , OrganizationLabelsHwnd{}
+        , OrganizationEditsHwnd{}
+        , ScriptMemberListHwnd(nullptr)
+        , ScriptMemberValueHwnd(nullptr)
+        , ApplyScriptMemberButtonHwnd(nullptr)
         , ApplyObjectButtonHwnd(nullptr)
+        , AssetFileListHwnd(nullptr)
+        , AssetEditorHwnd(nullptr)
+        , NewAssetButtonHwnd(nullptr)
+        , SaveAssetButtonHwnd(nullptr)
+        , DeleteAssetButtonHwnd(nullptr)
+        , AssetStatusLabelHwnd(nullptr)
         , StartButtonHwnd(nullptr)
         , PauseButtonHwnd(nullptr)
         , StopButtonHwnd(nullptr)
@@ -407,6 +433,7 @@ namespace Engine
         , ProgramVisualRefreshPending(false)
         , SuppressProgramCharacter(false)
         , EditingScriptWorkspace(false)
+        , EditingVisualAsset(false)
         , ActiveTabIndex(0)
         , EditorSplitDragOffset(0)
         , EngineSplitRatio(DefaultEngineSplitRatio)
@@ -635,7 +662,18 @@ namespace Engine
         ObjectParentLabelHwnd = nullptr;
         std::fill(std::begin(TransformLabelsHwnd), std::end(TransformLabelsHwnd), nullptr);
         std::fill(std::begin(TransformEditsHwnd), std::end(TransformEditsHwnd), nullptr);
+        std::fill(std::begin(OrganizationLabelsHwnd), std::end(OrganizationLabelsHwnd), nullptr);
+        std::fill(std::begin(OrganizationEditsHwnd), std::end(OrganizationEditsHwnd), nullptr);
+        ScriptMemberListHwnd = nullptr;
+        ScriptMemberValueHwnd = nullptr;
+        ApplyScriptMemberButtonHwnd = nullptr;
         ApplyObjectButtonHwnd = nullptr;
+        AssetFileListHwnd = nullptr;
+        AssetEditorHwnd = nullptr;
+        NewAssetButtonHwnd = nullptr;
+        SaveAssetButtonHwnd = nullptr;
+        DeleteAssetButtonHwnd = nullptr;
+        AssetStatusLabelHwnd = nullptr;
         StartButtonHwnd = nullptr;
         PauseButtonHwnd = nullptr;
         StopButtonHwnd = nullptr;
@@ -707,6 +745,9 @@ namespace Engine
         ProgramVisualRefreshPending = false;
         SuppressProgramCharacter = false;
         EditingScriptWorkspace = false;
+        EditingVisualAsset = false;
+        AssetFiles.clear();
+        CurrentAssetPath.clear();
         ProgramEditRevision = 0;
         ProgramSavedRevision = 0;
         ProgramRequestedRevision = 0;
@@ -958,6 +999,14 @@ namespace Engine
             CurrentEditorSnapshot.Scenes.size() != snapshot.Scenes.size() ||
             CurrentEditorSnapshot.Scripts.size() != snapshot.Scripts.size(); //Tree再構築が必要な場合true
         CurrentEditorSnapshot = snapshot;
+        if (snapshot.HasSkyStatus && SkyAssetPath != std::filesystem::path(snapshot.SkyTexturePath))
+        {
+            SkyAssetPath = snapshot.SkyTexturePath;
+            SavePlaybackSettings();
+        }
+        if (!snapshot.PreviewStatus.empty() && MediaStatusLabel && snapshot.PreviewRequestID == LatestPreviewRequestID)
+            SetWindowTextW(MediaStatusLabel, snapshot.PreviewStatus.c_str());
+        UpdateMediaTarget();
 
         if (MustRebuild)
         {
@@ -1285,6 +1334,7 @@ namespace Engine
         {
             const int ControlId = LOWORD(wparam); // 通知を送信したコントロールID
             const int NotificationCode = HIWORD(wparam); // コントロールの通知種類
+            if (HandleAssetPreviewCommand(ControlId, NotificationCode)) return 0;
 
             if (ControlId == RenderControlId && NotificationCode == STN_CLICKED)
             {
@@ -1361,6 +1411,34 @@ namespace Engine
                 return 0;
             }
 
+            if (ControlId == ApplyScriptMemberControlId && NotificationCode == BN_CLICKED)
+            {
+                ApplySelectedScriptMember();
+                return 0;
+            }
+
+            if (ControlId == ScriptMemberListControlId && NotificationCode == LBN_SELCHANGE)
+            {
+                const EditorComponentInfo* Component = GetSelectedComponentInfo();
+                const LRESULT Selection = SendMessageW(
+                    ScriptMemberListHwnd, LB_GETCURSEL, 0, 0);
+                if (Component != nullptr && Selection >= 0 &&
+                    static_cast<std::size_t>(Selection) < Component->ExposedMembers.size())
+                {
+                    const auto& Member = Component->ExposedMembers[
+                        static_cast<std::size_t>(Selection)];
+                    SetWindowTextW(ScriptMemberValueHwnd,
+                        ConvertEditorTextToWide(Member.Value).c_str());
+                    EnableWindow(ScriptMemberValueHwnd,
+                        !Member.Function && !Member.ReadOnly);
+                    EnableWindow(ApplyScriptMemberButtonHwnd,
+                        !Member.ReadOnly || Member.Function);
+                    SetWindowTextW(ApplyScriptMemberButtonHwnd,
+                        Member.Function ? L"公開関数を実行" : L"公開値を適用");
+                }
+                return 0;
+            }
+
             if (ControlId == PauseControlId && NotificationCode == BN_CLICKED)
             {
                 PauseRequested = true;
@@ -1399,6 +1477,27 @@ namespace Engine
             if (ControlId == ClearLogsControlId && NotificationCode == BN_CLICKED)
             {
                 ClearLogsRequested = true;
+                return 0;
+            }
+
+            if (ControlId == AssetFileListControlId && NotificationCode == LBN_SELCHANGE)
+            {
+                LoadSelectedAsset();
+                return 0;
+            }
+            if (ControlId == NewAssetControlId && NotificationCode == BN_CLICKED)
+            {
+                CreateAsset();
+                return 0;
+            }
+            if (ControlId == SaveAssetControlId && NotificationCode == BN_CLICKED)
+            {
+                SaveCurrentAsset();
+                return 0;
+            }
+            if (ControlId == DeleteAssetControlId && NotificationCode == BN_CLICKED)
+            {
+                DeleteCurrentAsset();
                 return 0;
             }
 
@@ -1645,6 +1744,16 @@ namespace Engine
                 if (ActiveTabIndex == 3 || ActiveTabIndex == 4)
                 {
                     SwitchProgramWorkspace(ActiveTabIndex == 4);
+                }
+                else if (ActiveTabIndex == 5 || ActiveTabIndex == 6)
+                {
+                    RefreshAssetFiles(ActiveTabIndex == 6);
+                }
+                else if (ActiveTabIndex == 7)
+                {
+                    RefreshMediaAssets(SelectedMediaPath.empty() ? SkyAssetPath : SelectedMediaPath);
+                    if (SelectedMediaPath.empty()) SelectMediaAsset();
+                    UpdateMediaTarget();
                 }
 
                 UpdateTabVisibility();
@@ -2260,7 +2369,7 @@ namespace Engine
             0,
             WC_TABCONTROLW,
             L"",
-            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP,
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | TCS_MULTILINE,
             0,
             0,
             1,
@@ -2456,6 +2565,43 @@ namespace Engine
             }
         }
 
+        constexpr const wchar_t* OrganizationNames[] =
+        {
+            L"Group", L"Tag", L"Layer", L"Group順", L"Object順"
+        };
+        for (int Index = 0; Index < 5; ++Index)
+        {
+            OrganizationLabelsHwnd[Index] = CreateWindowExW(
+                0, WC_STATICW, OrganizationNames[Index],
+                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT,
+                0, 0, 1, 1, Hwnd, nullptr, Instance, nullptr
+            );
+            OrganizationEditsHwnd[Index] = CreateWindowExW(
+                WS_EX_CLIENTEDGE, WC_EDITW,
+                Index == 1 ? L"Untagged" : L"0",
+                WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | ES_AUTOHSCROLL,
+                0, 0, 1, 1, Hwnd,
+                ToControlMenu(OrganizationEditControlBase + Index), Instance, nullptr
+            );
+        }
+
+        ScriptMemberListHwnd = CreateWindowExW(
+            WS_EX_CLIENTEDGE, WC_LISTBOXW, L"",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP |
+                WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+            0, 0, 1, 1, Hwnd, ToControlMenu(ScriptMemberListControlId), Instance, nullptr
+        );
+        ScriptMemberValueHwnd = CreateWindowExW(
+            WS_EX_CLIENTEDGE, WC_EDITW, L"",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | ES_AUTOHSCROLL,
+            0, 0, 1, 1, Hwnd, ToControlMenu(ScriptMemberValueControlId), Instance, nullptr
+        );
+        ApplyScriptMemberButtonHwnd = CreateWindowExW(
+            0, WC_BUTTONW, L"公開値を適用",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP | BS_PUSHBUTTON,
+            0, 0, 1, 1, Hwnd, ToControlMenu(ApplyScriptMemberControlId), Instance, nullptr
+        );
+
         ApplyObjectButtonHwnd = CreateWindowExW(
             0,
             WC_BUTTONW,
@@ -2469,6 +2615,37 @@ namespace Engine
             ToControlMenu(ApplyObjectControlId),
             Instance,
             nullptr
+        );
+
+        AssetFileListHwnd = CreateWindowExW(
+            WS_EX_CLIENTEDGE, WC_LISTBOXW, L"",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP |
+                WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT,
+            0, 0, 1, 1, Hwnd, ToControlMenu(AssetFileListControlId), Instance, nullptr
+        );
+        AssetEditorHwnd = CreateWindowExW(
+            WS_EX_CLIENTEDGE, WC_EDITW, L"",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | WS_TABSTOP |
+                WS_VSCROLL | WS_HSCROLL | ES_MULTILINE | ES_AUTOVSCROLL |
+                ES_AUTOHSCROLL | ES_WANTRETURN,
+            0, 0, 1, 1, Hwnd, ToControlMenu(AssetEditorControlId), Instance, nullptr
+        );
+        NewAssetButtonHwnd = CreateWindowExW(
+            0, WC_BUTTONW, L"新規", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+            0, 0, 1, 1, Hwnd, ToControlMenu(NewAssetControlId), Instance, nullptr
+        );
+        SaveAssetButtonHwnd = CreateWindowExW(
+            0, WC_BUTTONW, L"保存", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+            0, 0, 1, 1, Hwnd, ToControlMenu(SaveAssetControlId), Instance, nullptr
+        );
+        DeleteAssetButtonHwnd = CreateWindowExW(
+            0, WC_BUTTONW, L"削除", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON,
+            0, 0, 1, 1, Hwnd, ToControlMenu(DeleteAssetControlId), Instance, nullptr
+        );
+        AssetStatusLabelHwnd = CreateWindowExW(
+            0, WC_STATICW, L"Asset",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_LEFT,
+            0, 0, 1, 1, Hwnd, nullptr, Instance, nullptr
         );
 
         ProgramFileListHwnd = CreateWindowExW(
@@ -2776,7 +2953,7 @@ namespace Engine
             WC_STATICW,
             L"",
             WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS |
-                SS_BITMAP | SS_CENTERIMAGE,
+                SS_BLACKRECT,
             0,
             0,
             1,
@@ -2833,6 +3010,8 @@ namespace Engine
             nullptr
         );
 
+        if (!CreateAssetPreviewControls()) return false;
+
         const bool ControlsCreated =
             RenderHwnd != nullptr &&
             PanelHwnd != nullptr &&
@@ -2847,7 +3026,16 @@ namespace Engine
             ObjectNameEditHwnd != nullptr &&
             ObjectActiveCheckHwnd != nullptr &&
             ObjectParentLabelHwnd != nullptr &&
+            ScriptMemberListHwnd != nullptr &&
+            ScriptMemberValueHwnd != nullptr &&
+            ApplyScriptMemberButtonHwnd != nullptr &&
             ApplyObjectButtonHwnd != nullptr &&
+            AssetFileListHwnd != nullptr &&
+            AssetEditorHwnd != nullptr &&
+            NewAssetButtonHwnd != nullptr &&
+            SaveAssetButtonHwnd != nullptr &&
+            DeleteAssetButtonHwnd != nullptr &&
+            AssetStatusLabelHwnd != nullptr &&
             StartButtonHwnd != nullptr &&
             PauseButtonHwnd != nullptr &&
             StopButtonHwnd != nullptr &&
@@ -2883,6 +3071,16 @@ namespace Engine
             std::all_of(
                 std::begin(TransformEditsHwnd),
                 std::end(TransformEditsHwnd),
+                [](HWND handle) { return handle != nullptr; }
+            ) &&
+            std::all_of(
+                std::begin(OrganizationLabelsHwnd),
+                std::end(OrganizationLabelsHwnd),
+                [](HWND handle) { return handle != nullptr; }
+            ) &&
+            std::all_of(
+                std::begin(OrganizationEditsHwnd),
+                std::end(OrganizationEditsHwnd),
                 [](HWND handle) { return handle != nullptr; }
             ); // 必須コントロールを全て作成できたか
 
@@ -2956,7 +3154,16 @@ namespace Engine
         TabCtrl_InsertItem(EditorTabHwnd, 3, &TabItem);
         TabItem.pszText = const_cast<wchar_t*>(L"スクリプト");
         TabCtrl_InsertItem(EditorTabHwnd, 4, &TabItem);
+        TabItem.pszText = const_cast<wchar_t*>(L"アセット");
+        TabCtrl_InsertItem(EditorTabHwnd, 5, &TabItem);
+        TabItem.pszText = const_cast<wchar_t*>(L"Visual");
+        TabCtrl_InsertItem(EditorTabHwnd, 6, &TabItem);
+        TabItem.pszText = const_cast<wchar_t*>(L"プレビュー");
+        TabCtrl_InsertItem(EditorTabHwnd, 7, &TabItem);
         TabCtrl_SetCurSel(EditorTabHwnd, ActiveTabIndex);
+        InitializeAssetWorkspace();
+        LoadPlaybackSettings();
+        RefreshMediaAssets();
         UpdateTabVisibility();
 
         return true;
@@ -3024,167 +3231,6 @@ namespace Engine
             TRUE
         );
 
-        ContentTop += ScaledTitleHeight + Gap;
-
-        MoveWindow(
-            StartButtonHwnd,
-            ContentLeft,
-            ContentTop,
-            ButtonWidth,
-            ScaledButtonHeight,
-            TRUE
-        );
-        MoveWindow(
-            PauseButtonHwnd,
-            ContentLeft + ButtonWidth + Gap,
-            ContentTop,
-            ButtonWidth,
-            ScaledButtonHeight,
-            TRUE
-        );
-        MoveWindow(
-            StopButtonHwnd,
-            ContentLeft + (ButtonWidth + Gap) * 2,
-            ContentTop,
-            ButtonWidth,
-            ScaledButtonHeight,
-            TRUE
-        );
-        MoveWindow(
-            TickButtonHwnd,
-            ContentLeft + (ButtonWidth + Gap) * 3,
-            ContentTop,
-            ButtonWidth,
-            ScaledButtonHeight,
-            TRUE
-        );
-
-        ContentTop += ScaledButtonHeight + Gap;
-
-        MoveWindow(
-            StatusLabelHwnd,
-            ContentLeft,
-            ContentTop,
-            ContentWidth,
-            ScaledLabelHeight,
-            TRUE
-        );
-
-        ContentTop += ScaledLabelHeight + ScaledSectionGap;
-
-        MoveWindow(
-            PreviewLabelHwnd,
-            ContentLeft,
-            ContentTop,
-            ContentWidth,
-            ScaledLabelHeight,
-            TRUE
-        );
-
-        ContentTop += ScaledLabelHeight + Gap;
-
-        const int PreviewWidth = ScaleByDpi(
-            static_cast<int>(UISettings.PreviewWidth)
-        ); // DPI適用後の画像プレビュー幅
-        const int DesiredPreviewHeight = ScaleByDpi(
-            static_cast<int>(UISettings.PreviewHeight)
-        ); // DPI適用後の画像プレビュー希望高さ
-        const int ReservedMiddleAndLogHeight =
-            ScaledSectionGap +
-            ScaledLabelHeight +
-            Gap +
-            ScaledSliderHeight +
-            ScaledSectionGap +
-            ScaledLogHeaderHeight +
-            Gap +
-            ScaledMinimumLogHeight; // 画像より下へ必ず確保するFPS及びログ領域の高さ
-        const int AvailablePreviewHeight = std::max(
-            1,
-            ClientHeight - ContentTop - Margin - ReservedMiddleAndLogHeight
-        ); // 現在のウィンドウ高で画像へ割り当てられる高さ
-        const int PreviewHeight = std::min(
-            DesiredPreviewHeight,
-            AvailablePreviewHeight
-        ); // ログ領域を侵食しない画像プレビュー高さ
-        const int PreviewLeft = ContentLeft + std::max(
-            0,
-            (ContentWidth - PreviewWidth) / 2
-        ); // 右パネル中央へ配置する画像の左位置
-
-        MoveWindow(
-            PreviewImageHwnd,
-            PreviewLeft,
-            ContentTop,
-            std::min(PreviewWidth, ContentWidth),
-            PreviewHeight,
-            TRUE
-        );
-
-        ContentTop += PreviewHeight + ScaledSectionGap;
-
-        MoveWindow(
-            FrameRateLabelHwnd,
-            ContentLeft,
-            ContentTop,
-            std::max(1, ContentWidth - ScaledEditWidth - Gap),
-            ScaledLabelHeight,
-            TRUE
-        );
-        MoveWindow(
-            FrameRateEditHwnd,
-            ContentLeft + std::max(0, ContentWidth - ScaledEditWidth),
-            ContentTop,
-            ScaledEditWidth,
-            ScaledLabelHeight,
-            TRUE
-        );
-
-        ContentTop += ScaledLabelHeight + Gap;
-
-        MoveWindow(
-            FrameRateSliderHwnd,
-            ContentLeft,
-            ContentTop,
-            ContentWidth,
-            ScaledSliderHeight,
-            TRUE
-        );
-
-        ContentTop += ScaledSliderHeight + ScaledSectionGap;
-
-        const int LogLabelWidth = std::max(
-            1,
-            ContentWidth - ScaledClearButtonWidth - Gap
-        ); // 一括消去ボタンを除いたログ見出し幅
-
-        MoveWindow(
-            LogLabelHwnd,
-            ContentLeft,
-            ContentTop,
-            LogLabelWidth,
-            ScaledLogHeaderHeight,
-            TRUE
-        );
-        MoveWindow(
-            ClearLogsButtonHwnd,
-            ContentLeft + std::max(0, ContentWidth - ScaledClearButtonWidth),
-            ContentTop,
-            std::min(ScaledClearButtonWidth, ContentWidth),
-            ScaledLogHeaderHeight,
-            TRUE
-        );
-
-        ContentTop += ScaledLogHeaderHeight + Gap;
-
-        MoveWindow(
-            LogListHwnd,
-            ContentLeft,
-            ContentTop,
-            ContentWidth,
-            std::max(1, ClientHeight - ContentTop - Margin),
-            TRUE
-        );
-
         LayoutTabbedControls(PanelLeft, PanelWidth, ClientHeight);
 
         const HWND ForegroundControls[] =
@@ -3212,7 +3258,26 @@ namespace Engine
             TransformEditsHwnd[6],
             TransformEditsHwnd[7],
             TransformEditsHwnd[8],
+            OrganizationLabelsHwnd[0],
+            OrganizationLabelsHwnd[1],
+            OrganizationLabelsHwnd[2],
+            OrganizationLabelsHwnd[3],
+            OrganizationLabelsHwnd[4],
+            OrganizationEditsHwnd[0],
+            OrganizationEditsHwnd[1],
+            OrganizationEditsHwnd[2],
+            OrganizationEditsHwnd[3],
+            OrganizationEditsHwnd[4],
+            ScriptMemberListHwnd,
+            ScriptMemberValueHwnd,
+            ApplyScriptMemberButtonHwnd,
             ApplyObjectButtonHwnd,
+            AssetFileListHwnd,
+            AssetEditorHwnd,
+            NewAssetButtonHwnd,
+            SaveAssetButtonHwnd,
+            DeleteAssetButtonHwnd,
+            AssetStatusLabelHwnd,
             StartButtonHwnd,
             PauseButtonHwnd,
             StopButtonHwnd,
@@ -3273,6 +3338,7 @@ namespace Engine
             );
         }
 
+        SetAssetPreviewVisibility();
         InvalidateRect(Hwnd, nullptr, FALSE);
         UpdateRenderSize();
     }
@@ -3366,6 +3432,12 @@ namespace Engine
             )
             {
                 std::wstring ObjectLabel = Object.Active ? L"" : L"[無効] "; //Object有効状態Prefix
+                if (!Object.Group.empty())
+                {
+                    ObjectLabel += L"[" + ConvertEditorTextToWide(Object.Group) +
+                        L":" + std::to_wstring(Object.GroupOrder) + L"] ";
+                }
+                ObjectLabel += L"[L" + std::to_wstring(Object.Layer) + L"] ";
                 ObjectLabel += ConvertEditorTextToWide(Object.Name);
                 ObjectLabel += L" <";
                 ObjectLabel += GetObjectMenuName(Object.Type);
@@ -3529,6 +3601,25 @@ namespace Engine
         return nullptr;
     }
 
+    const EditorComponentInfo* WinApp::GetSelectedComponentInfo() const
+    {
+        const EditorTreeNode* Node = GetSelectedTreeNode();
+        const EditorObjectInfo* Object = GetSelectedObjectInfo();
+        if (Node == nullptr || Object == nullptr ||
+            Node->Kind != EditorTreeNodeKind::Component)
+        {
+            return nullptr;
+        }
+
+        const auto Found = std::find_if(
+            Object->Components.begin(), Object->Components.end(),
+            [Node](const EditorComponentInfo& component)
+            {
+                return component.ID == Node->Component;
+            });
+        return Found == Object->Components.end() ? nullptr : &*Found;
+    }
+
     //概要：Object Treeへ表示しているSceneのSnapshot情報を取得する
     //引数：なし
     //戻り値：選択Scene情報、存在しない場合はnullptr
@@ -3562,12 +3653,21 @@ namespace Engine
         {
             EnableWindow(Edit, Enabled);
         }
+        for (HWND Edit : OrganizationEditsHwnd)
+        {
+            EnableWindow(Edit, Enabled);
+        }
 
         if (Object == nullptr)
         {
             SetWindowTextW(ObjectNameEditHwnd, L"");
             SetWindowTextW(ObjectParentLabelHwnd, L"Parent: -");
             SendMessageW(ObjectActiveCheckHwnd, BM_SETCHECK, BST_UNCHECKED, 0);
+            for (HWND Edit : OrganizationEditsHwnd)
+            {
+                SetWindowTextW(Edit, L"");
+            }
+            UpdateScriptInspector();
             return;
         }
 
@@ -3625,6 +3725,82 @@ namespace Engine
             _snwprintf_s(Buffer, std::size(Buffer), _TRUNCATE, L"%.4f", Values[Index]);
             SetWindowTextW(TransformEditsHwnd[Index], Buffer);
         }
+
+        SetWindowTextW(OrganizationEditsHwnd[0], ConvertEditorTextToWide(Object->Group).c_str());
+        SetWindowTextW(OrganizationEditsHwnd[1], ConvertEditorTextToWide(Object->Tag).c_str());
+        const long OrganizationValues[] = {
+            static_cast<long>(Object->Layer),
+            static_cast<long>(Object->GroupOrder),
+            static_cast<long>(Object->ExecutionOrder)
+        };
+        for (int Index = 0; Index < 3; ++Index)
+        {
+            wchar_t Buffer[32]{};
+            _snwprintf_s(Buffer, std::size(Buffer), _TRUNCATE, L"%ld", OrganizationValues[Index]);
+            SetWindowTextW(OrganizationEditsHwnd[Index + 2], Buffer);
+        }
+        UpdateScriptInspector();
+    }
+
+    void WinApp::UpdateScriptInspector()
+    {
+        const EditorComponentInfo* Component = GetSelectedComponentInfo();
+        SendMessageW(ScriptMemberListHwnd, LB_RESETCONTENT, 0, 0);
+        SetWindowTextW(ScriptMemberValueHwnd, L"");
+        const bool Available = Component != nullptr && Component->Script &&
+            !Component->ExposedMembers.empty();
+        EnableWindow(ScriptMemberListHwnd, Available ? TRUE : FALSE);
+        EnableWindow(ScriptMemberValueHwnd, FALSE);
+        EnableWindow(ApplyScriptMemberButtonHwnd, FALSE);
+        SetWindowTextW(ApplyScriptMemberButtonHwnd, L"公開値を適用");
+
+        if (!Available)
+        {
+            return;
+        }
+
+        for (const EditorComponentInfo::ExposedMember& Member : Component->ExposedMembers)
+        {
+            std::wstring Label = Member.Function ? L"[関数] " : L"[" +
+                ConvertEditorTextToWide(Member.Type) + L"] ";
+            Label += ConvertEditorTextToWide(Member.Name);
+            if (!Member.Function)
+            {
+                Label += L" = " + ConvertEditorTextToWide(Member.Value);
+            }
+            SendMessageW(ScriptMemberListHwnd, LB_ADDSTRING, 0,
+                reinterpret_cast<LPARAM>(Label.c_str()));
+        }
+        SendMessageW(ScriptMemberListHwnd, LB_SETCURSEL, 0, 0);
+        const auto& First = Component->ExposedMembers.front();
+        SetWindowTextW(ScriptMemberValueHwnd, ConvertEditorTextToWide(First.Value).c_str());
+        EnableWindow(ScriptMemberValueHwnd, !First.Function && !First.ReadOnly);
+        EnableWindow(ApplyScriptMemberButtonHwnd, !First.ReadOnly || First.Function);
+        SetWindowTextW(ApplyScriptMemberButtonHwnd,
+            First.Function ? L"公開関数を実行" : L"公開値を適用");
+    }
+
+    void WinApp::ApplySelectedScriptMember()
+    {
+        const EditorTreeNode* Node = GetSelectedTreeNode();
+        const EditorComponentInfo* Component = GetSelectedComponentInfo();
+        const LRESULT Selection = SendMessageW(ScriptMemberListHwnd, LB_GETCURSEL, 0, 0);
+        if (Node == nullptr || Component == nullptr || Selection < 0 ||
+            static_cast<std::size_t>(Selection) >= Component->ExposedMembers.size())
+        {
+            return;
+        }
+        const auto& Member = Component->ExposedMembers[static_cast<std::size_t>(Selection)];
+        EditorCommand Command;
+        Command.Type = Member.Function
+            ? EditorCommandType::InvokeScriptFunction
+            : EditorCommandType::SetScriptMember;
+        Command.Scene = Node->Scene;
+        Command.Object = Node->Object;
+        Command.Component = Node->Component;
+        Command.Member = Member.Name;
+        Command.Value = ConvertEditorTextToUtf8(GetControlText(ScriptMemberValueHwnd).c_str());
+        QueueEditorCommand(std::move(Command));
     }
 
     //概要：Inspector入力を名前、有効状態、Local Transform操作としてQueueへ登録する
@@ -3701,6 +3877,31 @@ namespace Engine
         };
         TransformCommand.Transform.Scale = { Values[6], Values[7], Values[8] };
         QueueEditorCommand(std::move(TransformCommand));
+
+        long OrganizationValues[3]{};
+        for (int Index = 0; Index < 3; ++Index)
+        {
+            const std::wstring Text = GetControlText(OrganizationEditsHwnd[Index + 2]);
+            wchar_t* End = nullptr;
+            OrganizationValues[Index] = std::wcstol(Text.c_str(), &End, 10);
+            if (End == Text.c_str() || *End != L'\0')
+            {
+                MessageLog::GetInstance().AddLog(
+                    "[Warning] Editor | Layerと処理順には整数を入力してください。"
+                );
+                return;
+            }
+        }
+        EditorCommand Organization;
+        Organization.Type = EditorCommandType::SetObjectOrganization;
+        Organization.Scene = Node->Scene;
+        Organization.Object = Node->Object;
+        Organization.Group = ConvertEditorTextToUtf8(GetControlText(OrganizationEditsHwnd[0]).c_str());
+        Organization.Tag = ConvertEditorTextToUtf8(GetControlText(OrganizationEditsHwnd[1]).c_str());
+        Organization.Layer = static_cast<std::uint32_t>(std::clamp(OrganizationValues[0], 0l, 31l));
+        Organization.GroupOrder = static_cast<std::int32_t>(OrganizationValues[1]);
+        Organization.ExecutionOrder = static_cast<std::int32_t>(OrganizationValues[2]);
+        QueueEditorCommand(std::move(Organization));
     }
 
     //概要：現在選択中Tabに属するControlだけを表示する
@@ -3731,6 +3932,19 @@ namespace Engine
             TransformEditsHwnd[6],
             TransformEditsHwnd[7],
             TransformEditsHwnd[8],
+            OrganizationLabelsHwnd[0],
+            OrganizationLabelsHwnd[1],
+            OrganizationLabelsHwnd[2],
+            OrganizationLabelsHwnd[3],
+            OrganizationLabelsHwnd[4],
+            OrganizationEditsHwnd[0],
+            OrganizationEditsHwnd[1],
+            OrganizationEditsHwnd[2],
+            OrganizationEditsHwnd[3],
+            OrganizationEditsHwnd[4],
+            ScriptMemberListHwnd,
+            ScriptMemberValueHwnd,
+            ApplyScriptMemberButtonHwnd,
             ApplyObjectButtonHwnd
         }; //Engine Tabで表示するControl
         const HWND PlaybackControls[] =
@@ -3743,8 +3957,7 @@ namespace Engine
             FrameRateLabelHwnd,
             FrameRateEditHwnd,
             FrameRateSliderHwnd,
-            PreviewLabelHwnd,
-            PreviewImageHwnd
+            // プレビューは専用Tabへ移動。
         }; //再生Tabで表示するControl
         const HWND LogControls[] =
         {
@@ -3768,6 +3981,15 @@ namespace Engine
             ProgramStatusLabelHwnd,
             ProgramRoleLabelHwnd
         }; //Program Tabで表示するControl
+        const HWND AssetControls[] =
+        {
+            AssetFileListHwnd,
+            AssetEditorHwnd,
+            NewAssetButtonHwnd,
+            SaveAssetButtonHwnd,
+            DeleteAssetButtonHwnd,
+            AssetStatusLabelHwnd
+        };
 
         const auto SetVisibility = [](const HWND* controls, std::size_t count, bool visible)
         {
@@ -3800,6 +4022,12 @@ namespace Engine
             std::size(ProgramControls),
             IsProgramSourceTab()
         );
+        SetVisibility(
+            AssetControls,
+            std::size(AssetControls),
+            ActiveTabIndex == 5 || ActiveTabIndex == 6
+        );
+        SetAssetPreviewVisibility();
 
         if (!IsProgramSourceTab())
         {
@@ -3825,7 +4053,7 @@ namespace Engine
         const int TabTop = Margin + HeaderHeight + Gap; //Tab外枠上位置
         const int TabHeight = std::max(1, clientHeight - TabTop - Margin); //Tab外枠高さ
         const int PageLeft = ContentLeft + Gap; //Tab Page内左位置
-        const int PageTop = TabTop + TabHeaderHeight; //Tab Page内上位置
+        int PageTop = TabTop + TabHeaderHeight; //Tab Page内上位置
         const int PageWidth = std::max(1, ContentWidth - Gap * 2); //Tab Page内幅
         const int PageBottom = TabTop + TabHeight - Gap; //Tab Page内下位置
 
@@ -3838,6 +4066,10 @@ namespace Engine
             TabHeight,
             TRUE
         );
+
+        RECT tabPage{0, 0, ContentWidth, TabHeight};
+        TabCtrl_AdjustRect(EditorTabHwnd, FALSE, &tabPage);
+        PageTop = TabTop + tabPage.top + Gap;
 
         const int ActionButtonHeight = ScaleByDpi(ButtonHeight); //Engine操作Button高さ
         const int ActionButtonWidth = std::max(1, (PageWidth - Gap * 2) / 3); //Engine操作Button幅
@@ -3871,8 +4103,8 @@ namespace Engine
         const int EngineContentTop = EngineButtonTop + ActionButtonHeight + Gap; //Tree上位置
         const int InnerSplitter = ScaleByDpi(EditorInnerSplitterSize); //Engine内分割線高さ
         const int EngineAvailableHeight = std::max(1, PageBottom - EngineContentTop); //TreeとInspectorの総高さ
-        const int MinimumTreeHeight = ScaleByDpi(110); //Object Tree最小高さ
-        const int MinimumInspectorHeight = ScaleByDpi(205); //Inspector最小高さ
+        const int MinimumTreeHeight = ScaleByDpi(80); //Object Tree最小高さ
+        const int MinimumInspectorHeight = ScaleByDpi(360); //分類とScript公開値を含むInspector最小高さ
         const int MaximumTreeHeight = std::max(
             MinimumTreeHeight,
             EngineAvailableHeight - InnerSplitter - MinimumInspectorHeight
@@ -3908,6 +4140,33 @@ namespace Engine
         InspectorRowTop += InspectorRowHeight + Gap;
         MoveWindow(ObjectParentLabelHwnd, PageLeft, InspectorRowTop, PageWidth, InspectorRowHeight, TRUE);
         InspectorRowTop += InspectorRowHeight + Gap;
+
+        const int HalfWidth = std::max(1, (PageWidth - Gap) / 2);
+        const int OrganizationLabelWidth = ScaleByDpi(55);
+        for (int Index = 0; Index < 2; ++Index)
+        {
+            const int Left = PageLeft + Index * (HalfWidth + Gap);
+            MoveWindow(OrganizationLabelsHwnd[Index], Left, InspectorRowTop,
+                OrganizationLabelWidth, InspectorRowHeight, TRUE);
+            MoveWindow(OrganizationEditsHwnd[Index], Left + OrganizationLabelWidth,
+                InspectorRowTop, std::max(1, HalfWidth - OrganizationLabelWidth),
+                InspectorRowHeight, TRUE);
+        }
+        InspectorRowTop += InspectorRowHeight + Gap;
+
+        const int OrderColumnWidth = std::max(1, (PageWidth - Gap * 2) / 3);
+        const int OrderLabelWidth = ScaleByDpi(52);
+        for (int Index = 0; Index < 3; ++Index)
+        {
+            const int Left = PageLeft + Index * (OrderColumnWidth + Gap);
+            MoveWindow(OrganizationLabelsHwnd[Index + 2], Left, InspectorRowTop,
+                OrderLabelWidth, InspectorRowHeight, TRUE);
+            MoveWindow(OrganizationEditsHwnd[Index + 2], Left + OrderLabelWidth,
+                InspectorRowTop, std::max(1, OrderColumnWidth - OrderLabelWidth),
+                InspectorRowHeight, TRUE);
+        }
+        InspectorRowTop += InspectorRowHeight + Gap;
+
         const int TransformEditWidth = std::max(
             1,
             (PageWidth - InspectorLabelWidth - Gap * 3) / 3
@@ -3939,6 +4198,18 @@ namespace Engine
 
             InspectorRowTop += InspectorRowHeight + Gap;
         }
+
+        const int ScriptListHeight = ScaleByDpi(54);
+        MoveWindow(ScriptMemberListHwnd, PageLeft, InspectorRowTop,
+            PageWidth, ScriptListHeight, TRUE);
+        InspectorRowTop += ScriptListHeight + Gap;
+        const int ScriptButtonWidth = ScaleByDpi(128);
+        MoveWindow(ScriptMemberValueHwnd, PageLeft, InspectorRowTop,
+            std::max(1, PageWidth - ScriptButtonWidth - Gap), InspectorRowHeight, TRUE);
+        MoveWindow(ApplyScriptMemberButtonHwnd,
+            PageLeft + std::max(1, PageWidth - ScriptButtonWidth), InspectorRowTop,
+            ScriptButtonWidth, InspectorRowHeight, TRUE);
+        InspectorRowTop += InspectorRowHeight + Gap;
 
         MoveWindow(
             ApplyObjectButtonHwnd,
@@ -4010,29 +4281,7 @@ namespace Engine
             TRUE
         );
         PlaybackTop += SliderHeightValue + Gap;
-        MoveWindow(PreviewLabelHwnd, PageLeft, PlaybackTop, PageWidth, LabelHeightValue, TRUE);
-        PlaybackTop += LabelHeightValue + Gap;
-
-        const int PreviewWidthValue = std::min(
-            PageWidth,
-            ScaleByDpi(static_cast<int>(UISettings.PreviewWidth))
-        ); //Tab内に収めたPreview幅
-        const int PreviewHeightValue = std::max(
-            1,
-            std::min(
-                PageBottom - PlaybackTop,
-                ScaleByDpi(static_cast<int>(UISettings.PreviewHeight))
-            )
-        ); //Tab内に収めたPreview高さ
-        MoveWindow(
-            PreviewImageHwnd,
-            PageLeft + std::max(0, (PageWidth - PreviewWidthValue) / 2),
-            PlaybackTop,
-            PreviewWidthValue,
-            PreviewHeightValue,
-            TRUE
-        );
-
+        LayoutPlaybackSettings(PageLeft, PlaybackTop, PageWidth, PageBottom);
         const int ClearButtonWidth = ScaleByDpi(ClearLogsButtonWidth); //Log消去Button幅
         const int LogHeaderHeightValue = ScaleByDpi(LogHeaderHeight); //Log見出し高さ
         MoveWindow(
@@ -4185,11 +4434,31 @@ namespace Engine
             TRUE
         );
 
+        const int AssetButtonWidth = std::max(1, (PageWidth - Gap * 2) / 3);
+        MoveWindow(NewAssetButtonHwnd, PageLeft, PageTop,
+            AssetButtonWidth, ActionButtonHeight, TRUE);
+        MoveWindow(SaveAssetButtonHwnd, PageLeft + AssetButtonWidth + Gap, PageTop,
+            AssetButtonWidth, ActionButtonHeight, TRUE);
+        MoveWindow(DeleteAssetButtonHwnd, PageLeft + (AssetButtonWidth + Gap) * 2, PageTop,
+            AssetButtonWidth, ActionButtonHeight, TRUE);
+        const int AssetStatusTop = PageTop + ActionButtonHeight + Gap;
+        MoveWindow(AssetStatusLabelHwnd, PageLeft, AssetStatusTop,
+            PageWidth, InspectorRowHeight, TRUE);
+        const int AssetContentTop = AssetStatusTop + InspectorRowHeight + Gap;
+        const int AssetListWidth = std::max(ScaleByDpi(110), PageWidth / 3);
+        MoveWindow(AssetFileListHwnd, PageLeft, AssetContentTop,
+            AssetListWidth, std::max(1, PageBottom - AssetContentTop), TRUE);
+        MoveWindow(AssetEditorHwnd, PageLeft + AssetListWidth + Gap, AssetContentTop,
+            std::max(1, PageWidth - AssetListWidth - Gap),
+            std::max(1, PageBottom - AssetContentTop), TRUE);
+
         if (ProgramSuggestionListHwnd != nullptr &&
             IsWindowVisible(ProgramSuggestionListHwnd))
         {
             UpdateProgramSuggestions(false);
         }
+
+        LayoutAssetPreviewControls(PageLeft, PageTop, PageWidth, PageBottom);
 
         UpdateTabVisibility();
     }
@@ -4414,6 +4683,15 @@ namespace Engine
                 L"Scriptを差し込む"
             );
             AppendMenuW(Menu, MF_STRING, DuplicateObjectMenuId, L"複製");
+            if (ObjectInformation != nullptr && !ObjectInformation->Group.empty())
+            {
+                AppendMenuW(
+                    Menu,
+                    MF_STRING,
+                    ToggleGroupActiveMenuId,
+                    ObjectInformation->Active ? L"Group全体を無効化" : L"Group全体を有効化"
+                );
+            }
         }
 
         AppendMenuW(Menu, MF_STRING, RenameItemMenuId, L"名前変更");
@@ -4480,6 +4758,15 @@ namespace Engine
             if (SelectedCommand == DuplicateObjectMenuId)
             {
                 Command.Type = EditorCommandType::DuplicateObject;
+            }
+            else if (SelectedCommand == ToggleGroupActiveMenuId)
+            {
+                const EditorObjectInfo* Information = GetSelectedObjectInfo();
+                if (Information != nullptr)
+                {
+                    Command.Type = EditorCommandType::ToggleGroupActive;
+                    Command.Group = Information->Group;
+                }
             }
             else if (SelectedCommand == ToggleActiveMenuId)
             {
@@ -4595,6 +4882,126 @@ namespace Engine
     void WinApp::QueueEditorCommand(EditorCommand command)
     {
         PendingEditorCommands.emplace_back(std::move(command));
+    }
+
+    bool WinApp::InitializeAssetWorkspace()
+    {
+        std::error_code Error;
+        std::filesystem::create_directories("Assets", Error);
+        if (Error) return false;
+        std::filesystem::create_directories("Assets/VisualScripts", Error);
+        if (Error) return false;
+        RefreshAssetFiles(false);
+        return true;
+    }
+
+    void WinApp::RefreshAssetFiles(bool visualScripts)
+    {
+        EditingVisualAsset = visualScripts;
+        AssetFiles.clear();
+        SendMessageW(AssetFileListHwnd, LB_RESETCONTENT, 0, 0);
+        CurrentAssetPath.clear();
+        SetWindowTextW(AssetEditorHwnd, L"");
+        const std::filesystem::path Root = visualScripts
+            ? std::filesystem::path("Assets/VisualScripts")
+            : std::filesystem::path("Assets");
+        const std::string Extension = visualScripts ? ".vscript" : ".asset";
+        std::error_code Error;
+        for (std::filesystem::recursive_directory_iterator Iterator(Root, Error), End;
+            !Error && Iterator != End; Iterator.increment(Error))
+        {
+            if (Iterator->is_regular_file(Error) &&
+                Iterator->path().extension() == Extension)
+            {
+                AssetFiles.push_back(Iterator->path());
+            }
+        }
+        std::sort(AssetFiles.begin(), AssetFiles.end());
+        for (const auto& Path : AssetFiles)
+        {
+            const std::wstring Label = Path.lexically_relative(Root).wstring();
+            SendMessageW(AssetFileListHwnd, LB_ADDSTRING, 0,
+                reinterpret_cast<LPARAM>(Label.c_str()));
+        }
+        SetWindowTextW(AssetStatusLabelHwnd, visualScripts
+            ? L"ノードグラフIR: node <ID> Rotate/Move/PulseScale ...（将来のC++双方向変換用）"
+            : L"Engine Asset: 型付きpublic値を持つ編集可能な.assetファイル");
+        if (!AssetFiles.empty())
+        {
+            SendMessageW(AssetFileListHwnd, LB_SETCURSEL, 0, 0);
+            LoadSelectedAsset();
+        }
+    }
+
+    void WinApp::LoadSelectedAsset()
+    {
+        const LRESULT Selection = SendMessageW(AssetFileListHwnd, LB_GETCURSEL, 0, 0);
+        if (Selection < 0 || static_cast<std::size_t>(Selection) >= AssetFiles.size()) return;
+        CurrentAssetPath = AssetFiles[static_cast<std::size_t>(Selection)];
+        std::ifstream Stream(CurrentAssetPath, std::ios::binary);
+        if (!Stream) return;
+        std::string Text((std::istreambuf_iterator<char>(Stream)), std::istreambuf_iterator<char>());
+        SetWindowTextW(AssetEditorHwnd, ConvertEditorTextToWide(Text).c_str());
+    }
+
+    void WinApp::SaveCurrentAsset()
+    {
+        if (CurrentAssetPath.empty()) return;
+        const std::string Text = ConvertEditorTextToUtf8(GetControlText(AssetEditorHwnd).c_str());
+        std::ofstream Stream(CurrentAssetPath, std::ios::binary | std::ios::trunc);
+        if (!Stream)
+        {
+            MessageLog::GetInstance().AddLog("[Error] Asset | ファイルを保存できませんでした。");
+            return;
+        }
+        Stream.write(Text.data(), static_cast<std::streamsize>(Text.size()));
+        MessageLog::GetInstance().AddLog("[Info] Asset | 保存しました: " + CurrentAssetPath.string());
+    }
+
+    void WinApp::CreateAsset()
+    {
+        const std::filesystem::path Root = EditingVisualAsset
+            ? std::filesystem::path("Assets/VisualScripts")
+            : std::filesystem::path("Assets");
+        const std::string Extension = EditingVisualAsset ? ".vscript" : ".asset";
+        std::filesystem::path Path;
+        for (std::uint32_t Index = 1; ; ++Index)
+        {
+            Path = Root / ("NewAsset" + std::to_string(Index) + Extension);
+            if (!std::filesystem::exists(Path)) break;
+        }
+        std::ofstream Stream(Path, std::ios::binary);
+        if (!Stream) return;
+        const std::string Initial = EditingVisualAsset
+            ? "visual_script 1\nname NewVisualScript\npublic Float Speed = 1\nevent Update\nnode 1 Rotate 0 1 0\n"
+            : "asset 1\ntype Data\nname NewAsset\npublic Float Value = 0\n";
+        Stream.write(Initial.data(), static_cast<std::streamsize>(Initial.size()));
+        Stream.close();
+        RefreshAssetFiles(EditingVisualAsset);
+        const auto Found = std::find(AssetFiles.begin(), AssetFiles.end(), Path);
+        if (Found != AssetFiles.end())
+        {
+            const std::size_t Index = static_cast<std::size_t>(Found - AssetFiles.begin());
+            SendMessageW(AssetFileListHwnd, LB_SETCURSEL, Index, 0);
+            LoadSelectedAsset();
+        }
+    }
+
+    void WinApp::DeleteCurrentAsset()
+    {
+        if (CurrentAssetPath.empty() || MessageBoxW(
+            Hwnd, L"選択したAssetを削除しますか？", L"Asset削除",
+            MB_YESNO | MB_ICONWARNING) != IDYES)
+        {
+            return;
+        }
+        std::error_code Error;
+        std::filesystem::remove(CurrentAssetPath, Error);
+        if (Error)
+        {
+            MessageLog::GetInstance().AddLog("[Error] Asset | ファイルを削除できませんでした。");
+        }
+        RefreshAssetFiles(EditingVisualAsset);
     }
 
     //概要：Main ProgramとObject Scriptの保存先及びCompile環境を初期化する
@@ -6515,6 +6922,19 @@ namespace Engine
             TransformEditsHwnd[6],
             TransformEditsHwnd[7],
             TransformEditsHwnd[8],
+            OrganizationLabelsHwnd[0],
+            OrganizationLabelsHwnd[1],
+            OrganizationLabelsHwnd[2],
+            OrganizationLabelsHwnd[3],
+            OrganizationLabelsHwnd[4],
+            OrganizationEditsHwnd[0],
+            OrganizationEditsHwnd[1],
+            OrganizationEditsHwnd[2],
+            OrganizationEditsHwnd[3],
+            OrganizationEditsHwnd[4],
+            ScriptMemberListHwnd,
+            ScriptMemberValueHwnd,
+            ApplyScriptMemberButtonHwnd,
             ApplyObjectButtonHwnd,
             StartButtonHwnd,
             PauseButtonHwnd,
@@ -6541,7 +6961,13 @@ namespace Engine
             CompileProgramButtonHwnd,
             RestoreProgramButtonHwnd,
             ProgramStatusLabelHwnd,
-            ProgramRoleLabelHwnd
+            ProgramRoleLabelHwnd,
+            AssetFileListHwnd,
+            AssetEditorHwnd,
+            NewAssetButtonHwnd,
+            SaveAssetButtonHwnd,
+            DeleteAssetButtonHwnd,
+            AssetStatusLabelHwnd
         }; // UIフォントを設定するWindows標準コントロール
 
         for (HWND Control : Controls) // 現在フォントを適用するコントロール
@@ -6561,27 +6987,7 @@ namespace Engine
     // 現在のUIDemoビットマップを画像コントロールへ適用する
     void WinApp::ApplyDemoBitmap()
     {
-        if (PreviewImageHwnd == nullptr)
-        {
-            return;
-        }
-
-        SendMessageW(
-            PreviewImageHwnd,
-            STM_SETIMAGE,
-            IMAGE_BITMAP,
-            reinterpret_cast<LPARAM>(UIResources.GetDemoBitmap())
-        );
-
-        if (PreviewLabelHwnd != nullptr)
-        {
-            SetWindowTextW(
-                PreviewLabelHwnd,
-                UIResources.IsDemoBitmapLoaded()
-                    ? L"UIテクスチャ (UIDemo.png)"
-                    : L"UIDemo.png の読込に失敗"
-            );
-        }
+        // 専用DX12プレビューが画像とモデルを表示する。
     }
 
     // 再生状態に合わせてボタンと状態テキストを更新する

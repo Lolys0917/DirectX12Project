@@ -15,6 +15,7 @@
 //||
 
 #include "DirectX12.h"
+#include "TextureDisplay.h"
 
 #include <cstdio>
 
@@ -163,6 +164,7 @@ namespace Engine
             BackBuffer.Reset();
         }
 
+        SkyTexture.reset();
         DepthStencilBuffer.Reset();
         RTVHeap.Reset();
         DSVHeap.Reset();
@@ -414,7 +416,8 @@ namespace Engine
 
         CommandQueue->ExecuteCommandLists(1, CommandLists);
 
-        HRESULT PresentResult = SwapChain->Present(1, 0); // BackBuffer表示結果
+        // 更新間隔はFrameRateControllerが管理する。二つの描画先で垂直同期を重ねない。
+        HRESULT PresentResult = SwapChain->Present(0, 0);
 
         if (FAILED(PresentResult))
         {
@@ -694,7 +697,12 @@ namespace Engine
 
         if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&DebugController))))
         {
-            DebugController->EnableDebugLayer();
+            static bool DebugLayerEnabled = false;
+            if (!DebugLayerEnabled)
+            {
+                DebugController->EnableDebugLayer();
+                DebugLayerEnabled = true;
+            }
             FactoryFlags |= DXGI_CREATE_FACTORY_DEBUG;
         }
 #endif

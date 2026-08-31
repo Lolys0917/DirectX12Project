@@ -6,6 +6,7 @@
 //||
 
 #include "GameRuntime.h"
+#include "AssetPreview.h"
 
 #include <algorithm>
 #include <chrono>
@@ -61,17 +62,29 @@ namespace Engine
         HWND renderWindow,
         std::uint32_t width,
         std::uint32_t height,
-        std::uint32_t targetFrameRate
+        std::uint32_t targetFrameRate,
+        HWND previewWindow
     )
     {
-        if (renderWindow == nullptr || width == 0 || height == 0 || Worker.joinable())
+        if (renderWindow == nullptr || width == 0 || height == 0)
         {
+            MessageLog::GetInstance().AddLog(
+                "[Error] GameRuntime | Start received an invalid render window or size."
+            );
+            return false;
+        }
+        if (Worker.joinable())
+        {
+            MessageLog::GetInstance().AddLog(
+                "[Error] GameRuntime | Start was requested while the game thread was already active."
+            );
             return false;
         }
 
         {
             const std::lock_guard<std::mutex> Lock(RuntimeMutex); //初期設定公開を保護するGuard
             RenderWindow = renderWindow;
+            PreviewWindow = previewWindow;
             InitialWidth = width;
             InitialHeight = height;
             RequestedFrameRate = std::clamp(targetFrameRate, 1u, 240u);
@@ -280,6 +293,9 @@ namespace Engine
         }
 
         EngineAPI NativeAPI(Application); //Game Thread内だけでEngine状態を操作するFacade
+        AssetPreview Preview(PreviewWindow);
+        std::wstring CurrentSkyPath;
+        std::uint64_t PreviewRequestID = 0;
         const bool DiagnosticMode = IsEngineDiagnosticModeEnabled(); //明示的な実行時診断起動の場合true
 
         if (DiagnosticMode)
@@ -358,7 +374,32 @@ namespace Engine
 
             for (EditorCommand& Command : Commands)
             {
-                if (!NativeAPI.ExecuteEditorCommand(Command))
+                if (Command.Type == EditorCommandType::SetPlaybackSettings)
+                {
+                    if (Command.Playback.IsValid()) ActivePlaybackSettings = Command.Playback;
+                    NeedsDraw = true;
+                    continue;
+                }
+                if (Command.Type == EditorCommandType::PreviewAsset || Command.Type == EditorCommandType::PreviewView ||
+                    Command.Type == EditorCommandType::PreviewTexture)
+                {
+                    Preview.Handle(Command);
+                    if (Command.PreviewRequestID) PreviewRequestID = Command.PreviewRequestID;
+                    continue;
+                }
+                const bool Succeeded = NativeAPI.ExecuteEditorCommand(Command);
+                if (Command.Type == EditorCommandType::SetSkyTexture || Command.Type == EditorCommandType::ApplyObjectTexture ||
+                    Command.Type == EditorCommandType::ImportModel)
+                {
+                    if (Command.PreviewRequestID) PreviewRequestID = Command.PreviewRequestID;
+                    if (Succeeded && Command.Type == EditorCommandType::SetSkyTexture) CurrentSkyPath = Command.Path;
+                    Preview.SetStatus(Succeeded ? L"適用しました。左側のゲーム画面で確認できます。"
+                        : L"適用できませんでした。選択Object・画像形式・ログを確認してください。元の状態を保持しています。");
+                    MessageLog::GetInstance().AddLog(Succeeded
+                        ? "[Info] Assets | Texture/background/model operation completed."
+                        : "[Warning] Assets | Asset operation failed; previous asset was preserved.");
+                }
+                if (!Succeeded)
                 {
                     MessageLog::GetInstance().AddLog(
                         "[Warning] Editor | Requested game-thread operation failed."
@@ -455,10 +496,17 @@ namespace Engine
 
             float DeltaTime = 0.0f; //今回の固定更新秒数
 
+            // 停止中も新しい縦横比で描き直す。古い画面を引き伸ばさない。
+            if (Resize.has_value()) NeedsDraw = true;
+
             if (FrameRate.TryConsumeStep(DeltaTime))
             {
-                NativeAPI.UpdateExtensions(DeltaTime);
-                Application.Update(DeltaTime);
+                DeltaTime *= ActivePlaybackSettings.TimeScale;
+                if (DeltaTime > 0)
+                {
+                    NativeAPI.UpdateExtensions(DeltaTime);
+                    Application.Update(DeltaTime);
+                }
                 NeedsDraw = true;
             }
 
@@ -468,15 +516,22 @@ namespace Engine
                 NeedsDraw = false;
             }
 
-            if (PublishedRevision != NativeAPI.GetRevision())
+            Preview.DrawIfNeeded();
+
+            if (PublishedRevision != NativeAPI.GetRevision() || !Commands.empty())
             {
                 EditorSnapshot Snapshot = NativeAPI.CreateEditorSnapshot(); //UIへ公開する一貫したEngine状態
+                Snapshot.PreviewStatus = Preview.GetStatus();
+                Snapshot.PreviewRequestID = PreviewRequestID;
+                Snapshot.SkyTexturePath = CurrentSkyPath;
+                Snapshot.HasSkyStatus = true;
                 PublishedRevision = Snapshot.Revision;
                 const std::lock_guard<std::mutex> Lock(RuntimeMutex); //最新Snapshot置換を保護するGuard
                 PublishedSnapshot = std::move(Snapshot);
             }
 
-            const std::uint32_t WaitMilliseconds = FrameRate.GetWaitMilliseconds(); //次Frameまで待てる時間
+            const std::uint32_t WaitMilliseconds = IsWindowVisible(PreviewWindow)
+                ? std::min(50u, FrameRate.GetWaitMilliseconds()) : FrameRate.GetWaitMilliseconds();
             std::unique_lock<std::mutex> Lock(RuntimeMutex); //要求又はFrame時刻を待つLock
             WakeCondition.wait_for(
                 Lock,

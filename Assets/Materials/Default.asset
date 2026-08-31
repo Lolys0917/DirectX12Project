@@ -1,0 +1,6 @@
+asset 1
+type Material
+name Default
+public Color BaseColor = 1,1,1,1
+public Float Roughness = 0.5
+public Float Metallic = 0.0

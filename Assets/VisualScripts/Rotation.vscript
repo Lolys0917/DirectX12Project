@@ -1,0 +1,7 @@
+visual_script 1
+name Rotation
+
+# Canonical graph IR. Stable node/link IDs are intended for future C++ <-> graph conversion.
+public Vector3 AngularVelocity = 0,1,0
+event Update
+node 1 Rotate 0 1 0

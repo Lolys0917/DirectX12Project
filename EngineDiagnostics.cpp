@@ -44,6 +44,11 @@
 #include "ScriptSystem.h"
 #include "Vertex.h"
 #include "VertexMesh.h"
+#include "NativeScripts.h"
+#include "OBJModel.h"
+#include "Texture2D.h"
+#include "Box.h"
+#include "PlaybackSettings.h"
 
 namespace Engine
 {
@@ -534,6 +539,17 @@ namespace Engine
 
             if (NativeScript != nullptr)
             {
+                const std::vector<ScriptExposedMember> PublicMembers =
+                    NativeScript->GetExposedMembers();
+                Context.Check(!PublicMembers.empty() &&
+                    PublicMembers.front().Name == "RadiansPerSecond",
+                    "Script reflection | Native public variable enumerated");
+                Context.Check(engine.SetScriptMember(
+                    OriginalMainSceneID,
+                    NativeScript->GetID(),
+                    "RadiansPerSecond",
+                    "0,2,0"
+                ), "Script reflection | Native public variable changed");
                 Context.Check(engine.SetComponentActive(
                     OriginalMainSceneID,
                     NativeScript->GetID(),
@@ -563,6 +579,12 @@ namespace Engine
                 Application.Update(0.25f);
                 Context.Check(CapsuleObject->GetRotation().y > PreviousRotation,
                     "Script | OnStart and OnUpdate executed");
+                Context.Check(engine.InvokeScriptFunction(
+                    OriginalMainSceneID,
+                    NativeScript->GetID(),
+                    "ResetRotation"
+                ) && NearlyEqual(CapsuleObject->GetRotation().y, 0.0f),
+                    "Script reflection | Native public function invoked");
             }
 
             Context.Check(engine.SetObjectActive(
@@ -666,6 +688,10 @@ namespace Engine
                 Application.Update(0.25f);
                 Context.Check(DLLScriptObject->GetRotation().y > BeforeUpdate,
                     "DLL Script | Host callbacks updated Object");
+                Context.Check(Modules.LoadModule(ScriptDLLPath),
+                    "DLL Script | Same-name module hot reloaded");
+                Context.Check(engine.GetScriptRegistry().Contains("dll:Sample.Rotation:rotation"),
+                    "DLL Script | Replacement factory registered");
                 Context.Check(Modules.UnloadModule(ScriptDLLPath),
                     "DLL Script | Factory module unloaded");
                 Context.Check(!engine.GetScriptRegistry().Contains("dll:Sample.Rotation:rotation"),
@@ -833,14 +859,78 @@ namespace Engine
             RemoveIfPresent(engine, OriginalMainSceneID, *Iterator);
         }
 
-        Context.Check(MainObjects.GetObjectCount() == InitialObjectCount,
-            "Cleanup | Main Scene object count restored");
+        const std::vector<ObjectID> RemainingObjectIDs = MainObjects.GetObjectIDs();
+        const bool ProgramTombstonesInactive = std::all_of(
+            RemainingObjectIDs.begin(),
+            RemainingObjectIDs.end(),
+            [&MainObjects](ObjectID id)
+            {
+                const Object* Value = MainObjects.FindObject(id);
+                return Value == nullptr || Value->GetName().find("StressBox") != 0 ||
+                    !Value->IsActive();
+            });
+        Context.Check(MainObjects.GetObjectCount() >= InitialObjectCount &&
+            ProgramTombstonesInactive,
+            "Cleanup | Main Program objects retained as inactive differential tombstones");
         Context.Check(MainObjects.GetComponentCount() == InitialComponentCount,
             "Cleanup | Main Scene component count restored");
         Context.Check(engine.GetMainSceneID() == OriginalMainSceneID &&
             engine.GetViewSceneID() == OriginalViewSceneID,
             "Cleanup | Main and View Scene restored");
         Context.Check(Scenes.GetSceneCount() == 1, "Cleanup | Temporary Scenes removed");
+        // Asset/physics regressions use isolated objects and restore global settings.
+        const std::wstring DDSPath = L"Assets/Textures/joran-quinten-CRmulUkILVg-unsplash.dds";
+        Texture2D DDS;
+        Context.Check(DDS.LoadFromFile(Graphics, DDSPath) && DDS.GetWidth() == 3000 && DDS.GetHeight() == 1998,
+            "Assets | Provided DDS uploads without padding distortion");
+        Box TexturedBox;
+        Context.Check(TexturedBox.CreateGPUResource(Graphics) && TexturedBox.SetTexture(Graphics, DDSPath),
+            "Assets | DDS applies to primitive meshes");
+        auto BoxCopy = TexturedBox.Clone();
+        auto* PrimitiveCopy = dynamic_cast<PrimitiveObject*>(BoxCopy.get());
+        Context.Check(PrimitiveCopy && PrimitiveCopy->GetMesh().GetTexturePath() == DDSPath &&
+            PrimitiveCopy->CreateGPUResource(Graphics), "Assets | Texture survives primitive cloning and GPU recreation");
+        OBJModel TexturedModel;
+        Context.Check(TexturedModel.Load(Graphics, L"12222_Cat_v1_l3.obj", DirectX::XMFLOAT4{1,1,1,1}) &&
+            TexturedModel.SetTexture(Graphics, DDSPath), "Assets | DDS applies to OBJ models");
+        DirectX::XMFLOAT3 PreviewCenter{}; float PreviewRadius = 0;
+        TexturedModel.GetBounds(PreviewCenter, PreviewRadius);
+        Context.Check(std::isfinite(PreviewRadius) && PreviewRadius > 0,
+            "Assets | Model preview auto-fit bounds are finite");
+        Context.Check(Graphics.SetSkyTexture(DDSPath), "Assets | DDS sky loads");
+        Application.Draw();
+        Context.Check(!Graphics.IsFrameOpen(), "Assets | Background and scene render together");
+        Context.Check(Graphics.SetSkyTexture(L""), "Assets | Background can be removed");
+
+        const PlaybackSettings SavedPlaybackSettings = ActivePlaybackSettings;
+        ActivePlaybackSettings = {};
+        ActivePlaybackSettings.LinearDrag = 0;
+        ActivePlaybackSettings.GroundEnabled = false;
+        ObjectManager PhysicsProbe;
+        Object* FallingObject = PhysicsProbe.CreateObject<Object>("Gravity Probe");
+        GravityScript* Gravity = FallingObject
+            ? PhysicsProbe.AddComponent<GravityScript>(FallingObject->GetID(), "Gravity") : nullptr;
+        Context.Check(Gravity && PhysicsProbe.InitializeComponents(Graphics), "Physics | Gravity script initializes");
+        if (Gravity)
+        {
+            FallingObject->SetPosition({0,10,0});
+            PhysicsProbe.UpdateComponents(0.1f);
+            Context.Check(FallingObject->GetPosition().y < 10, "Physics | Default gravity moves an opted-in object");
+            Gravity->InvokeExposedFunction("ResetVelocity");
+            ActivePlaybackSettings.GravityY = 9.81f;
+            const float PreviousHeight = FallingObject->GetPosition().y;
+            PhysicsProbe.UpdateComponents(0.1f);
+            Context.Check(FallingObject->GetPosition().y > PreviousHeight, "Physics | Editing base gravity reverses acceleration");
+            Gravity->InvokeExposedFunction("ResetVelocity");
+            ActivePlaybackSettings.GravityY = -9.81f;
+            ActivePlaybackSettings.GroundEnabled = true;
+            ActivePlaybackSettings.GroundHeight = 2;
+            ActivePlaybackSettings.Restitution = 0;
+            FallingObject->SetPosition({0,3,0});
+            PhysicsProbe.UpdateComponents(2.0f);
+            Context.Check(NearlyEqual(FallingObject->GetPosition().y, 2.5f), "Physics | Ground height and object offset prevent penetration");
+        }
+        ActivePlaybackSettings = SavedPlaybackSettings;
         Application.Draw();
         Context.Check(!Graphics.IsFrameOpen(), "Cleanup | Final frame completed");
 

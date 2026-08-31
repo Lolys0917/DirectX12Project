@@ -48,6 +48,7 @@ namespace Engine
         //引数：なし
         //戻り値：読み取り専用VertexMesh
         const VertexMesh& GetMesh() const { return Mesh; }
+        bool SetTexture(DirectX12& graphics, const std::wstring& path) { return Mesh.SetTexture(graphics, path); }
 
         //CPUメッシュからGPU資源を作成する
         //dx12 : DirectX12基盤
@@ -66,6 +67,7 @@ namespace Engine
         void Finalize() override;
 
     protected:
+        void CopyDefinitionTo(Object& destination) const;
         //指定種別のプリミティブオブジェクトを作成する
         //objectType : オブジェクト種別
         explicit PrimitiveObject(ObjectType objectType);

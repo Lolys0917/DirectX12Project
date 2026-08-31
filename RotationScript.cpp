@@ -11,6 +11,8 @@
 
 #include "RotationScript.h"
 
+#include <cstdio>
+
 #include "Object.h"
 
 namespace Engine
@@ -43,6 +45,40 @@ namespace Engine
     const DirectX::XMFLOAT3& RotationScript::GetRadiansPerSecond() const
     {
         return RadiansPerSecond;
+    }
+
+    std::vector<ScriptExposedMember> RotationScript::GetExposedMembers() const
+    {
+        char Buffer[128]{};
+        std::snprintf(Buffer, std::size(Buffer), "%g,%g,%g",
+            RadiansPerSecond.x, RadiansPerSecond.y, RadiansPerSecond.z);
+        return {
+            { "RadiansPerSecond", "Vector3", Buffer, false, false },
+            { "ResetRotation", "Action", "", true, false }
+        };
+    }
+
+    bool RotationScript::SetExposedMember(const std::string& name, const std::string& value)
+    {
+        DirectX::XMFLOAT3 Parsed{};
+        if (name != "RadiansPerSecond" || ::sscanf_s(
+            value.c_str(), "%f,%f,%f", &Parsed.x, &Parsed.y, &Parsed.z) != 3)
+        {
+            return false;
+        }
+        RadiansPerSecond = Parsed;
+        return true;
+    }
+
+    bool RotationScript::InvokeExposedFunction(const std::string& name)
+    {
+        Object* Owner = GetOwner();
+        if (name != "ResetRotation" || Owner == nullptr)
+        {
+            return false;
+        }
+        Owner->SetRotation({ 0.0f, 0.0f, 0.0f });
+        return true;
     }
 
     //概要：同じ角速度を持つ未登録Rotation Scriptを複製する

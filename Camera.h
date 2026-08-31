@@ -71,6 +71,8 @@ namespace Engine
         void SetTarget(const DirectX::XMFLOAT3& target);
         void SetUp(const DirectX::XMFLOAT3& up);
         void SetMoveSpeed(float moveSpeed);
+        void SetPreviewView(const DirectX::XMFLOAT3& position, float aspect)
+        { DetachedPosition = position; Aspect = aspect; }
 
         DirectX::XMMATRIX GetViewMatrix() const;
         DirectX::XMMATRIX GetProjectionMatrix() const;

@@ -12,6 +12,7 @@
 //||
 
 #include "Camera.h"
+#include "PlaybackSettings.h"
 
 #include <Windows.h>
 
@@ -80,7 +81,7 @@ namespace Engine
     void Camera::Update(float deltaTime)
     {
         DirectX::XMFLOAT3 Position = GetPosition(); //更新前のCamera位置
-        const float Move = MoveSpeed * deltaTime; //今回の更新で移動する距離
+        const float Move = MoveSpeed * (ActivePlaybackSettings.CameraSpeed / 5.0f) * deltaTime;
 
         if (GameInput::IsKeyDown(VK_LEFT))
         {

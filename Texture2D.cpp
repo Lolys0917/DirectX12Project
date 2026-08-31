@@ -15,6 +15,11 @@
 //||
 
 #include "Texture2D.h"
+#include "DDSImage.h"
+#include <filesystem>
+#include <algorithm>
+#include <cwctype>
+#include <utility>
 
 #include "DirectX12.h"
 #include "MessageLog.h"
@@ -81,6 +86,21 @@ namespace Engine
         const std::wstring& filePath
     )
     {
+        std::wstring Extension = std::filesystem::path(filePath).extension().wstring();
+        std::transform(Extension.begin(), Extension.end(), Extension.begin(),
+            [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+        if (Extension == L".dds")
+        {
+            std::vector<unsigned char> Pixels;
+            uint32_t ImageWidth = 0, ImageHeight = 0;
+            std::string Error;
+            if (!DecodeDDS(filePath, Pixels, ImageWidth, ImageHeight, Error))
+            {
+                MessageLog::GetInstance().AddLog("[Error] DDS | " + Error);
+                return false;
+            }
+            return CreateFromRGBA(dx12, Pixels.data(), ImageWidth, ImageHeight);
+        }
         Microsoft::WRL::ComPtr<IWICImagingFactory> Factory; //WIC画像Factory
 
         HRESULT Result = CoCreateInstance(
@@ -139,7 +159,8 @@ namespace Engine
             return false;
         }
 
-        if (ImageWidth == 0 || ImageHeight == 0 ||
+        if (ImageWidth == 0 || ImageHeight == 0 || ImageWidth > 16384 || ImageHeight > 16384 ||
+            std::uint64_t(ImageWidth) * ImageHeight > 64 * 1024 * 1024 ||
             ImageWidth > (std::numeric_limits<UINT>::max)() / 4 ||
             ImageHeight > (std::numeric_limits<UINT>::max)() / (ImageWidth * 4))
         {
@@ -224,6 +245,15 @@ namespace Engine
             1,
             1
         );
+    }
+
+    void Texture2D::Swap(Texture2D& other) noexcept
+    {
+        TextureResource.Swap(other.TextureResource);
+        SRVHeap.Swap(other.SRVHeap);
+        std::swap(Width, other.Width);
+        std::swap(Height, other.Height);
+        std::swap(Format, other.Format);
     }
 
     //RGBA8 Pixel列からGPU Textureを作成する

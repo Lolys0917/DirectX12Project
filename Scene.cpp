@@ -382,6 +382,7 @@ namespace Engine
                 *ViewCamera
             }; // Camera pass固有の描画Context
 
+            dx12.DrawSky(*ViewCamera);
             Objects->DrawComponents(Context);
             ViewCamera->EndRender(dx12);
         }

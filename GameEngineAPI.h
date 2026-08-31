@@ -557,6 +557,49 @@ namespace EngineGame
                 );
         }
 
+        bool SetOrganization(
+            const std::string& group,
+            const std::string& tag = "Untagged",
+            std::uint32_t layer = 0,
+            std::int32_t groupOrder = 0,
+            std::int32_t executionOrder = 0
+        ) const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, SetObjectOrganization) +
+                sizeof(decltype(EngineHostAPI::SetObjectOrganization));
+            return Detail::HasHostMember(Host, MemberEnd) && ObjectID != 0 &&
+                Host->SetObjectOrganization != nullptr &&
+                Host->SetObjectOrganization(
+                    Host->Context,
+                    SceneID,
+                    ObjectID,
+                    group.c_str(),
+                    tag.c_str(),
+                    layer,
+                    groupOrder,
+                    executionOrder
+                );
+        }
+
+        std::string GetGroup() const
+        {
+            EngineExternalObjectInfo Information{};
+            return TryGetInfo(Information) ? Information.Group : std::string();
+        }
+
+        std::string GetTag() const
+        {
+            EngineExternalObjectInfo Information{};
+            return TryGetInfo(Information) ? Information.Tag : std::string();
+        }
+
+        std::uint32_t GetLayer() const
+        {
+            EngineExternalObjectInfo Information{};
+            return TryGetInfo(Information) ? Information.Layer : 0u;
+        }
+
         bool AttachScript(const std::string& scriptKey) const
         {
             return Host != nullptr && ObjectID != 0 && !scriptKey.empty() &&
@@ -671,13 +714,29 @@ namespace EngineGame
 
             for (std::uint32_t Index = 0; Index < count; ++Index)
             {
-                ObjectHandle Created = Create(
-                    type,
-                    baseName + std::to_string(Index)
-                );
+                const std::string Name = baseName + std::to_string(Index);
+                std::uint32_t ExistingID = 0;
+                constexpr std::size_t FindMemberEnd =
+                    offsetof(EngineHostAPI, FindObjectByNameOnly) +
+                    sizeof(decltype(EngineHostAPI::FindObjectByNameOnly));
+
+                if (Detail::HasHostMember(Host, FindMemberEnd) &&
+                    Host->FindObjectByNameOnly != nullptr)
+                {
+                    ExistingID = Host->FindObjectByNameOnly(
+                        Host->Context,
+                        SceneID,
+                        Name.c_str()
+                    );
+                }
+
+                ObjectHandle Created = ExistingID == 0
+                    ? Create(type, Name)
+                    : ObjectHandle(Host, SceneID, ExistingID);
 
                 if (Created.GetID() != 0)
                 {
+                    Created.SetActive(true);
                     Result.emplace_back(Created);
                 }
             }
@@ -865,12 +924,29 @@ namespace EngineGame
 
             for (std::uint32_t Index = 0; Index < count; ++Index)
             {
-                ObjectHandle Created = CreateCapsuleModel(
-                    baseName + std::to_string(Index)
-                );
+                const std::string Name = baseName + std::to_string(Index);
+                std::uint32_t ExistingID = 0;
+                constexpr std::size_t FindMemberEnd =
+                    offsetof(EngineHostAPI, FindObjectByNameOnly) +
+                    sizeof(decltype(EngineHostAPI::FindObjectByNameOnly));
+
+                if (Detail::HasHostMember(Detail::ActiveHost, FindMemberEnd) &&
+                    Detail::ActiveHost->FindObjectByNameOnly != nullptr)
+                {
+                    ExistingID = Detail::ActiveHost->FindObjectByNameOnly(
+                        Detail::ActiveHost->Context,
+                        Detail::ActiveSceneID,
+                        Name.c_str()
+                    );
+                }
+
+                ObjectHandle Created = ExistingID == 0
+                    ? CreateCapsuleModel(Name)
+                    : ObjectHandle(Detail::ActiveHost, Detail::ActiveSceneID, ExistingID);
 
                 if (Created.GetID() != 0)
                 {
+                    Created.SetActive(true);
                     Result.emplace_back(Created);
                 }
             }
@@ -1006,6 +1082,36 @@ namespace EngineGame
                     }
 
                     return false;
+                });
+        }
+
+        std::vector<ObjectHandle> FindByGroup(const std::string& group) const
+        {
+            return FindMatching([&group](
+                const EngineExternalObjectInfo& information,
+                const ObjectHandle&)
+                {
+                    return information.Group == group;
+                });
+        }
+
+        std::vector<ObjectHandle> FindByTag(const std::string& tag) const
+        {
+            return FindMatching([&tag](
+                const EngineExternalObjectInfo& information,
+                const ObjectHandle&)
+                {
+                    return information.Tag == tag;
+                });
+        }
+
+        std::vector<ObjectHandle> FindByLayer(std::uint32_t layer) const
+        {
+            return FindMatching([layer](
+                const EngineExternalObjectInfo& information,
+                const ObjectHandle&)
+                {
+                    return information.Layer == layer;
                 });
         }
 

@@ -31,6 +31,9 @@ namespace Engine
 
         void SetRadiansPerSecond(const DirectX::XMFLOAT3& value);
         const DirectX::XMFLOAT3& GetRadiansPerSecond() const;
+        std::vector<ScriptExposedMember> GetExposedMembers() const override;
+        bool SetExposedMember(const std::string& name, const std::string& value) override;
+        bool InvokeExposedFunction(const std::string& name) override;
 
     protected:
         std::unique_ptr<Script> CloneScript() const override;

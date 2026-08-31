@@ -99,6 +99,11 @@ struct EngineExternalObjectInfo final
     bool Active;
     char Name[128];
     EngineExternalTransform LocalTransform;
+    char Group[128];
+    char Tag[128];
+    std::uint32_t Layer;
+    std::int32_t GroupOrder;
+    std::int32_t ExecutionOrder;
 };
 
 struct EngineExternalComponentInfo final
@@ -197,6 +202,9 @@ struct EngineHostAPI final
     //v1.20以降の追記専用API。安定ID Handleから一覧走査なしで情報を取得する。
     bool (ENGINE_EXTENSION_CALL* GetObjectInfoByID)(void* context, std::uint32_t sceneID, std::uint32_t objectID, EngineExternalObjectInfo* information);
     bool (ENGINE_EXTENSION_CALL* GetComponentInfoByID)(void* context, std::uint32_t sceneID, std::uint32_t componentID, EngineExternalComponentInfo* information);
+
+    //v1.30以降。Objectの分類とGroup Scheduler順をまとめて設定する。
+    bool (ENGINE_EXTENSION_CALL* SetObjectOrganization)(void* context, std::uint32_t sceneID, std::uint32_t objectID, const char* group, const char* tag, std::uint32_t layer, std::int32_t groupOrder, std::int32_t executionOrder);
 };
 
 struct EngineExtensionModuleDescriptor final

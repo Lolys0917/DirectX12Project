@@ -15,6 +15,12 @@
 
 namespace Engine
 {
+    void PrimitiveObject::CopyDefinitionTo(Object& destination) const
+    {
+        Object::CopyDefinitionTo(destination);
+        if (auto* primitive = dynamic_cast<PrimitiveObject*>(&destination))
+            primitive->Mesh.CopyTextureDefinition(Mesh);
+    }
     //指定種別のプリミティブオブジェクトを作成する
     //objectType : オブジェクト種別
     PrimitiveObject::PrimitiveObject(ObjectType objectType)

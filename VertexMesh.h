@@ -21,6 +21,9 @@
 #include <DirectXMath.h>
 
 #include "Vertex.h"
+#include "Texture2D.h"
+#include <memory>
+#include <string>
 
 namespace Engine
 {
@@ -45,6 +48,9 @@ namespace Engine
         //頂点Bufferを変更せず、このMeshの描画色をRoot Constantsで上書きする
         //引数: color 新しいRGBA描画色
         void SetVertexColor(const DirectX::XMFLOAT4& color);
+        bool SetTexture(DirectX12& dx12, const std::wstring& path);
+        void CopyTextureDefinition(const VertexMesh& source) { TexturePath = source.TexturePath; }
+        const std::wstring& GetTexturePath() const { return TexturePath; }
 
         //頂点をCPU Mesh末尾へ追加する
         //引数: vertex 追加する頂点
@@ -105,6 +111,8 @@ namespace Engine
         bool CreateIndexBuffer(DirectX12& dx12);
 
         std::vector<Vertex> Vertices; //CPU側の頂点一覧
+        std::wstring TexturePath;
+        std::shared_ptr<Texture2D> DiffuseTexture;
         std::vector<uint32_t> Indices; //CPU側のTriangle Index一覧
         Microsoft::WRL::ComPtr<ID3D12Resource> VertexBuffer; //GPU頂点Buffer
         Microsoft::WRL::ComPtr<ID3D12Resource> IndexBuffer; //GPU Index Buffer

@@ -53,6 +53,11 @@ namespace Engine
         , Type(objectType)
         , Name()
         , Active(true)
+        , Tag("Untagged")
+        , Layer(0)
+        , ProcessingGroup()
+        , GroupOrder(0)
+        , ExecutionOrder(0)
         , ObjectTransform()
         , Parent(nullptr)
         , Children()
@@ -82,6 +87,11 @@ namespace Engine
     void Object::CopyDefinitionTo(Object& destination) const
     {
         destination.Active = Active;
+        destination.Tag = Tag;
+        destination.Layer = Layer;
+        destination.ProcessingGroup = ProcessingGroup;
+        destination.GroupOrder = GroupOrder;
+        destination.ExecutionOrder = ExecutionOrder;
         destination.ObjectTransform = ObjectTransform;
     }
 

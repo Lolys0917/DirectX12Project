@@ -89,6 +89,7 @@ namespace Engine
             Mesh.GetIndices()
         );
         CopyDefinitionTo(*ClonedComponent);
+        ClonedComponent->Mesh.CopyTextureDefinition(Mesh);
         return ClonedComponent;
     }
 }

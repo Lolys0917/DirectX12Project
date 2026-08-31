@@ -33,6 +33,10 @@
 #include "PrimitiveObject.h"
 #include "ProgramSuggestionRegistry.h"
 #include "RotationScript.h"
+#include "NativeScripts.h"
+#include "OBJModel.h"
+#include "MeshComponent.h"
+#include <filesystem>
 #include "Scene.h"
 #include "SceneManager.h"
 #include "Script.h"
@@ -150,6 +154,27 @@ namespace Engine
         Scripts.RegisterNativeScript<RotationScript>(
             "native.rotation",
             "Rotation Script"
+        );
+        Scripts.RegisterNativeScript<GravityScript>("native.gravity", "重力 / Gravity");
+        Scripts.RegisterNativeScript<BobbingScript>(
+            "native.bobbing",
+            "Bobbing Script"
+        );
+        Scripts.RegisterNativeScript<OrbitScript>(
+            "native.orbit",
+            "Orbit Script"
+        );
+        Scripts.RegisterNativeScript<PulseScaleScript>(
+            "native.pulse_scale",
+            "Pulse Scale Script"
+        );
+        Scripts.RegisterNativeScript<ColorPulseScript>(
+            "native.color_pulse",
+            "Color Pulse Script"
+        );
+        Scripts.RegisterNativeScript<VisualScript>(
+            "native.visual_script",
+            "Visual Script"
         );
     }
 
@@ -389,6 +414,11 @@ namespace Engine
         information.Type = TargetObject->GetType();
         information.Name = TargetObject->GetName();
         information.Active = TargetObject->IsActive();
+        information.Group = TargetObject->GetProcessingGroup();
+        information.Tag = TargetObject->GetTag();
+        information.Layer = TargetObject->GetLayer();
+        information.GroupOrder = TargetObject->GetGroupOrder();
+        information.ExecutionOrder = TargetObject->GetExecutionOrder();
         information.ParentID = TargetObject->GetParentID();
         const DirectX::XMFLOAT3& Position = TargetObject->GetPosition(); //Local座標
         const DirectX::XMFLOAT3& Rotation = TargetObject->GetRotation(); //Local回転
@@ -438,6 +468,19 @@ namespace Engine
             : ScriptComponent->GetDisplayName();
         information.Active = TargetComponent->IsActive();
         information.Script = ScriptComponent != nullptr;
+        if (ScriptComponent != nullptr)
+        {
+            for (const ScriptExposedMember& Member : ScriptComponent->GetExposedMembers())
+            {
+                information.ExposedMembers.push_back({
+                    Member.Name,
+                    Member.Type,
+                    Member.Value,
+                    Member.Function,
+                    Member.ReadOnly
+                });
+            }
+        }
         return true;
     }
 
@@ -837,6 +880,39 @@ namespace Engine
         return true;
     }
 
+    //ObjectのGroup、Tag、Layer及びScheduler順をまとめて変更する
+    bool EngineAPI::SetObjectOrganization(
+        SceneID sceneID,
+        ObjectID objectID,
+        const std::string& group,
+        const std::string& tag,
+        std::uint32_t layer,
+        std::int32_t groupOrder,
+        std::int32_t executionOrder
+    )
+    {
+        Scene* TargetScene = ResolveScene(sceneID);
+        if (TargetScene == nullptr || !TargetScene->GetObjectManager().SetObjectOrganization(
+            objectID, group, tag, layer, groupOrder, executionOrder))
+        {
+            return false;
+        }
+        IncrementRevision();
+        return true;
+    }
+
+    bool EngineAPI::SetGroupActive(SceneID sceneID, const std::string& group, bool active)
+    {
+        Scene* TargetScene = ResolveScene(sceneID);
+        if (TargetScene == nullptr ||
+            TargetScene->GetObjectManager().SetGroupActive(group, active) == 0)
+        {
+            return false;
+        }
+        IncrementRevision();
+        return true;
+    }
+
     //概要：ID指定Objectの3軸外形寸法を具象Primitive形状へ設定する
     //引数：sceneID=対象Scene、objectID=対象Object、size=X幅・Y高さ・Z奥行き
     //戻り値：対応Primitiveへ寸法を設定できた場合はtrue
@@ -1055,6 +1131,41 @@ namespace Engine
         Extensions.Update(deltaTime);
     }
 
+    bool EngineAPI::SetScriptMember(
+        SceneID sceneID,
+        ComponentID componentID,
+        const std::string& member,
+        const std::string& value
+    )
+    {
+        Scene* TargetScene = ResolveScene(sceneID);
+        Script* Target = TargetScene == nullptr ? nullptr : dynamic_cast<Script*>(
+            TargetScene->GetObjectManager().FindComponent(componentID));
+        if (Target == nullptr || !Target->SetExposedMember(member, value))
+        {
+            return false;
+        }
+        IncrementRevision();
+        return true;
+    }
+
+    bool EngineAPI::InvokeScriptFunction(
+        SceneID sceneID,
+        ComponentID componentID,
+        const std::string& function
+    )
+    {
+        Scene* TargetScene = ResolveScene(sceneID);
+        Script* Target = TargetScene == nullptr ? nullptr : dynamic_cast<Script*>(
+            TargetScene->GetObjectManager().FindComponent(componentID));
+        if (Target == nullptr || !Target->InvokeExposedFunction(function))
+        {
+            return false;
+        }
+        IncrementRevision();
+        return true;
+    }
+
     //再生開始又は最初のTick直前のScene定義をStop復元用に保存する
     bool EngineAPI::CapturePlaybackState()
     {
@@ -1086,6 +1197,51 @@ namespace Engine
 
         switch (command.Type)
         {
+        case EditorCommandType::SetSkyTexture:
+            Succeeded = Application.GetDirectX12().SetSkyTexture(command.Path);
+            break;
+
+        case EditorCommandType::ApplyObjectTexture:
+            if (TargetScene)
+            {
+                auto& objects = TargetScene->GetObjectManager();
+                auto* object = objects.FindObject(command.Object);
+                auto& graphics = Application.GetDirectX12();
+                if (auto* primitive = dynamic_cast<PrimitiveObject*>(object))
+                    Succeeded = primitive->SetTexture(graphics, command.Path);
+                else if (object)
+                {
+                    for (auto id : object->GetComponentIDs())
+                    {
+                        if (auto* model = dynamic_cast<OBJModel*>(objects.FindComponent(id)))
+                        { Succeeded = model->SetTexture(graphics, command.Path); break; }
+                        if (auto* mesh = dynamic_cast<MeshComponent*>(objects.FindComponent(id)))
+                        { Succeeded = mesh->GetMesh().SetTexture(graphics, command.Path); break; }
+                    }
+                }
+            }
+            break;
+
+        case EditorCommandType::ImportModel:
+            if (TargetScene)
+            {
+                auto& graphics = Application.GetDirectX12();
+                auto model = std::make_unique<OBJModel>();
+                if (!model->Load(graphics, command.Path, DirectX::XMFLOAT4{1,1,1,1})) break;
+                DirectX::XMFLOAT3 center{}; float radius = 1;
+                model->GetBounds(center, radius);
+                auto& objects = TargetScene->GetObjectManager();
+                auto* object = objects.CreateObject<Object>(command.Text.empty() ? "Imported Model" : command.Text);
+                if (!object) break;
+                // 取り込み元のサイズに依存せず、原点付近へ見やすい大きさで追加する。
+                object->SetScale({1 / radius, 1 / radius, 1 / radius});
+                object->SetPosition({-center.x / radius, 1 - center.y / radius, -center.z / radius});
+                auto* component = objects.AddComponent(object->GetID(), std::move(model), "OBJ Model");
+                Succeeded = component && component->Initialize(graphics);
+                if (!Succeeded) objects.RemoveObject(object->GetID());
+            }
+            break;
+
         case EditorCommandType::CreateObject:
             return CreateObject(
                 command.Scene,
@@ -1149,6 +1305,26 @@ namespace Engine
             }
             break;
 
+        case EditorCommandType::SetObjectOrganization:
+            return SetObjectOrganization(
+                command.Scene,
+                command.Object,
+                command.Group,
+                command.Tag,
+                command.Layer,
+                command.GroupOrder,
+                command.ExecutionOrder
+            );
+
+        case EditorCommandType::ToggleGroupActive:
+            if (TargetScene != nullptr)
+            {
+                Object* Target = TargetScene->GetObjectManager().FindObject(command.Object);
+                return Target != nullptr && !command.Group.empty() &&
+                    SetGroupActive(command.Scene, command.Group, !Target->IsActive());
+            }
+            return false;
+
         case EditorCommandType::SetObjectParent:
             Succeeded = TargetScene != nullptr && TargetScene->GetObjectManager().SetParent(
                 command.Object,
@@ -1188,6 +1364,21 @@ namespace Engine
                 }
             }
             break;
+
+        case EditorCommandType::SetScriptMember:
+            return SetScriptMember(
+                command.Scene,
+                command.Component,
+                command.Member,
+                command.Value
+            );
+
+        case EditorCommandType::InvokeScriptFunction:
+            return InvokeScriptFunction(
+                command.Scene,
+                command.Component,
+                command.Member
+            );
 
         case EditorCommandType::LoadScriptModule:
             Succeeded = Modules.LoadModule(command.Path);
@@ -1280,7 +1471,14 @@ namespace Engine
                 ObjectInfo.Type = CurrentObject->GetType();
                 ObjectInfo.Name = CurrentObject->GetName();
                 ObjectInfo.Active = CurrentObject->IsActive();
+                ObjectInfo.Group = CurrentObject->GetProcessingGroup();
+                ObjectInfo.Tag = CurrentObject->GetTag();
+                ObjectInfo.Layer = CurrentObject->GetLayer();
+                ObjectInfo.GroupOrder = CurrentObject->GetGroupOrder();
+                ObjectInfo.ExecutionOrder = CurrentObject->GetExecutionOrder();
                 ObjectInfo.ParentID = CurrentObject->GetParentID();
+                if (auto* primitive = dynamic_cast<const PrimitiveObject*>(CurrentObject))
+                    Snapshot.ReferencedAssets.push_back(primitive->GetMesh().GetTexturePath());
                 const DirectX::XMFLOAT3& Position = CurrentObject->GetPosition(); //Local座標
                 const DirectX::XMFLOAT3& Rotation = CurrentObject->GetRotation(); //Local回転角
                 const DirectX::XMFLOAT3& Scale = CurrentObject->GetScale(); //Local拡縮率
@@ -1302,6 +1500,13 @@ namespace Engine
                     const Script* ScriptComponent = dynamic_cast<const Script*>(
                         CurrentComponent
                     ); //Script固有表示名を持つ場合の参照
+                    if (auto* model = dynamic_cast<const OBJModel*>(CurrentComponent))
+                    {
+                        Snapshot.ReferencedAssets.push_back(model->GetSourcePath());
+                        Snapshot.ReferencedAssets.push_back(model->GetTexturePath());
+                    }
+                    if (auto* mesh = dynamic_cast<const MeshComponent*>(CurrentComponent))
+                        Snapshot.ReferencedAssets.push_back(mesh->GetMesh().GetTexturePath());
                     ObjectInfo.Components.push_back(EditorComponentInfo
                     {
                         ComponentIDValue,
@@ -1310,8 +1515,23 @@ namespace Engine
                             ? GetComponentTypeName(CurrentComponent->GetType())
                             : ScriptComponent->GetDisplayName(),
                         CurrentComponent->IsActive(),
-                        ScriptComponent != nullptr
+                        ScriptComponent != nullptr,
+                        {}
                     });
+                    if (ScriptComponent != nullptr)
+                    {
+                        EditorComponentInfo& Added = ObjectInfo.Components.back();
+                        for (const ScriptExposedMember& Member : ScriptComponent->GetExposedMembers())
+                        {
+                            Added.ExposedMembers.push_back({
+                                Member.Name,
+                                Member.Type,
+                                Member.Value,
+                                Member.Function,
+                                Member.ReadOnly
+                            });
+                        }
+                    }
                 }
 
                 SceneInfo.Objects.emplace_back(std::move(ObjectInfo));
@@ -1329,6 +1549,105 @@ namespace Engine
     std::uint64_t EngineAPI::GetRevision() const
     {
         return Revision;
+    }
+
+    //Hot Reload候補のInitが参照又は作成する宣言Objectの収集を開始する
+    void EngineAPI::BeginProgramObjectSynchronization()
+    {
+        PendingProgramObjects.clear();
+        PendingCreatedProgramObjects.clear();
+        ProgramObjectSynchronizationActive = true;
+    }
+
+    //作成Object、又は前世代から引き継いだObjectを今回の宣言集合へ記録する
+    void EngineAPI::RecordProgramObjectDeclaration(
+        SceneID sceneID,
+        ObjectID objectID,
+        bool created
+    )
+    {
+        if (!ProgramObjectSynchronizationActive || !sceneID.IsValid() ||
+            !objectID.IsValid())
+        {
+            return;
+        }
+
+        const std::uint64_t Key = MakeProgramObjectKey(sceneID, objectID);
+        if (created)
+        {
+            KnownProgramObjects.insert(Key);
+        }
+        if (KnownProgramObjects.contains(Key))
+        {
+            PendingProgramObjects.insert(Key);
+        }
+        if (created)
+        {
+            PendingCreatedProgramObjects.insert(Key);
+        }
+    }
+
+    //新世代から消えた宣言Objectをtombstoneにせず無効化し、戻ったObjectを再有効化する
+    void EngineAPI::CommitProgramObjectSynchronization()
+    {
+        if (!ProgramObjectSynchronizationActive)
+        {
+            return;
+        }
+
+        for (const std::uint64_t Key : ManagedProgramObjects)
+        {
+            if (!PendingProgramObjects.contains(Key))
+            {
+                SetObjectActive(
+                    SceneID(static_cast<std::uint32_t>(Key >> 32)),
+                    ObjectID(static_cast<std::uint32_t>(Key)),
+                    false
+                );
+            }
+        }
+
+        for (const std::uint64_t Key : PendingProgramObjects)
+        {
+            SetObjectActive(
+                SceneID(static_cast<std::uint32_t>(Key >> 32)),
+                ObjectID(static_cast<std::uint32_t>(Key)),
+                true
+            );
+        }
+
+        ManagedProgramObjects = std::move(PendingProgramObjects);
+        PendingProgramObjects.clear();
+        PendingCreatedProgramObjects.clear();
+        ProgramObjectSynchronizationActive = false;
+    }
+
+    //候補DLLの生成失敗時は途中作成物だけを無効化し、旧世代の集合を保持する
+    void EngineAPI::CancelProgramObjectSynchronization()
+    {
+        if (!ProgramObjectSynchronizationActive)
+        {
+            return;
+        }
+
+        for (const std::uint64_t Key : PendingCreatedProgramObjects)
+        {
+            SetObjectActive(
+                SceneID(static_cast<std::uint32_t>(Key >> 32)),
+                ObjectID(static_cast<std::uint32_t>(Key)),
+                false
+            );
+        }
+
+        PendingProgramObjects.clear();
+        PendingCreatedProgramObjects.clear();
+        ProgramObjectSynchronizationActive = false;
+    }
+
+    std::uint64_t EngineAPI::MakeProgramObjectKey(SceneID sceneID, ObjectID objectID)
+    {
+        return (static_cast<std::uint64_t>(sceneID.GetValue()) << 32) |
+            objectID.GetValue();
     }
 
     //概要：指定ID又はView Sceneから操作対象Sceneを解決する

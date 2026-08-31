@@ -47,7 +47,8 @@ namespace Engine
             HWND renderWindow,
             std::uint32_t width,
             std::uint32_t height,
-            std::uint32_t targetFrameRate
+            std::uint32_t targetFrameRate,
+            HWND previewWindow = nullptr
         );
 
         //概要：Game ThreadへEditor操作をFIFO順で渡す
@@ -110,6 +111,7 @@ namespace Engine
         bool HasPendingRequestLocked() const;
 
         HWND RenderWindow; //DirectX SwapChainを接続する子Window
+        HWND PreviewWindow = nullptr;
         std::uint32_t InitialWidth; //Game Thread初期描画幅
         std::uint32_t InitialHeight; //Game Thread初期描画高さ
         std::uint32_t RequestedFrameRate; //UIから受け取った最新固定更新FPS

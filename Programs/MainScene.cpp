@@ -8,7 +8,7 @@ using namespace EngineGame;
 
 namespace Game::MainScene
 {
-    constexpr std::uint32_t StressObjectCount = 1024;
+    constexpr std::uint32_t StressObjectCount = 50;
     ObjectHandle MainCapsule; //個別操作するObjectの安定Handle
     std::vector<ObjectHandle> StressObjects; //一括操作するObject Handle配列
     float ElapsedTime = 0.0f; //Initで再生ごとに初期化するScene状態
@@ -27,12 +27,8 @@ namespace Game::MainScene
         MainCapsule.SetPosition(3.0f, 1.0f, 2.0f);
         MainCapsule.SetColor(0.95f, 0.4f, 0.18f);
 
-        StressObjects = Object.FindAll("StressBox");
-
-        if (StressObjects.empty())
-        {
-            StressObjects = AddObject.CreateBoxes("StressBox", StressObjectCount);
-        }
+        //宣言数と前世代のObject集合を差分同期する。余剰分は削除せず無効化される。
+        StressObjects = AddObject.CreateBoxes("StressBox", StressObjectCount);
 
         for (std::size_t Index = 0; Index < StressObjects.size(); ++Index)
         {

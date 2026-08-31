@@ -39,7 +39,10 @@ cbuffer MeshConstants : register(b0)
     float4x4 WorldViewProjection;
     float4 ObjectColor;
     uint UseObjectColor;
+    uint UseTexture;
 };
+Texture2D Diffuse : register(t0);
+SamplerState TextureSampler : register(s0);
 
 struct VSInput
 {
@@ -53,6 +56,7 @@ struct VSOutput
 {
     float4 Position : SV_POSITION;
     float4 Color : COLOR;
+    float2 UV : TEXCOORD;
 };
 
 VSOutput VSMain(VSInput input)
@@ -60,12 +64,13 @@ VSOutput VSMain(VSInput input)
     VSOutput output;
     output.Position = mul(float4(input.Position, 1.0f), WorldViewProjection);
     output.Color = UseObjectColor != 0 ? ObjectColor : input.Color;
+    output.UV = input.UV;
     return output;
 }
 
 float4 PSMain(VSOutput input) : SV_TARGET
 {
-    return input.Color;
+    return input.Color * (UseTexture != 0 ? Diffuse.Sample(TextureSampler, input.UV) : float4(1,1,1,1));
 }
 
 )"; //共通Vertex Color描画用HLSL Source
@@ -75,7 +80,8 @@ float4 PSMain(VSOutput input) : SV_TARGET
             DirectX::XMFLOAT4X4 WorldViewProjection;
             DirectX::XMFLOAT4 ObjectColor;
             std::uint32_t UseObjectColor;
-            std::uint32_t Padding[3];
+            std::uint32_t UseTexture;
+            std::uint32_t Padding[2];
         }; //256-bit境界へ揃えた描画単位Root Constants
 
         static_assert(sizeof(MeshRootConstants) == sizeof(std::uint32_t) * 24);
@@ -87,6 +93,7 @@ float4 PSMain(VSOutput input) : SV_TARGET
             DXGI_FORMAT DepthStencilFormat = DXGI_FORMAT_UNKNOWN;
             Microsoft::WRL::ComPtr<ID3D12RootSignature> RootSignature;
             Microsoft::WRL::ComPtr<ID3D12PipelineState> PipelineState;
+            std::shared_ptr<Texture2D> WhiteTexture;
         }; //同一Deviceの全VertexMeshで共有する不変Pipeline
 
         SharedMeshPipeline SharedPipeline; //Game Threadだけが生成・参照する共通Pipeline
@@ -265,6 +272,12 @@ float4 PSMain(VSOutput input) : SV_TARGET
             return false;
         }
 
+        if (!DiffuseTexture && !TexturePath.empty())
+        {
+            auto texture = std::make_shared<Texture2D>();
+            if (!texture->LoadFromFile(dx12, TexturePath)) return false;
+            DiffuseTexture = std::move(texture);
+        }
         GPUResourceReady = true;
         GPUResourceDirty = false;
         return true;
@@ -306,10 +319,16 @@ float4 PSMain(VSOutput input) : SV_TARGET
         );
         RootConstants.ObjectColor = ColorOverride;
         RootConstants.UseObjectColor = UseColorOverride ? 1u : 0u;
+        RootConstants.UseTexture = DiffuseTexture ? 1u : 0u;
 
         ID3D12GraphicsCommandList* CommandList = Dx12.GetCommandList(); //描画命令の記録先
         CommandList->SetGraphicsRootSignature(RootSignature.Get());
         CommandList->SetPipelineState(PipelineState.Get());
+        Texture2D* texture = DiffuseTexture ? DiffuseTexture.get() : SharedPipeline.WhiteTexture.get();
+        if (!texture) return;
+        auto* heap = texture->GetSRVHeap();
+        CommandList->SetDescriptorHeaps(1, &heap);
+        CommandList->SetGraphicsRootDescriptorTable(1, texture->GetSRVGPUHandle());
         CommandList->SetGraphicsRoot32BitConstants(
             0,
             24,
@@ -348,6 +367,16 @@ float4 PSMain(VSOutput input) : SV_TARGET
         UseColorOverride = true;
     }
 
+    bool VertexMesh::SetTexture(DirectX12& dx12, const std::wstring& path)
+    {
+        if (dx12.IsFrameOpen() || !dx12.WaitGPU()) return false;
+        auto candidate = std::make_shared<Texture2D>();
+        if (!candidate->LoadFromFile(dx12, path)) return false;
+        DiffuseTexture = std::move(candidate);
+        TexturePath = path;
+        return true;
+    }
+
     //CPU Meshと一致するGPU Resourceが描画可能か確認する
     //戻り値 : Resource作成済みかつCPU変更後の再生成が不要な場合はtrue
     bool VertexMesh::IsGPUResourceReady() const
@@ -379,13 +408,28 @@ float4 PSMain(VSOutput input) : SV_TARGET
         RootParameter.Constants.ShaderRegister = 0;
         RootParameter.Constants.RegisterSpace = 0;
         RootParameter.Constants.Num32BitValues = 24;
-        RootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_VERTEX;
+        RootParameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+        D3D12_DESCRIPTOR_RANGE Range{};
+        Range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
+        Range.NumDescriptors = 1;
+        D3D12_ROOT_PARAMETER Parameters[2] = { RootParameter, {} };
+        Parameters[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+        Parameters[1].DescriptorTable.NumDescriptorRanges = 1;
+        Parameters[1].DescriptorTable.pDescriptorRanges = &Range;
+        Parameters[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
+        D3D12_STATIC_SAMPLER_DESC Sampler{};
+        Sampler.Filter = D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+        Sampler.AddressU = Sampler.AddressV = Sampler.AddressW = D3D12_TEXTURE_ADDRESS_MODE_WRAP;
+        Sampler.ComparisonFunc = D3D12_COMPARISON_FUNC_ALWAYS;
+        Sampler.MaxLOD = D3D12_FLOAT32_MAX;
+        Sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
 
         D3D12_ROOT_SIGNATURE_DESC Description{}; //RootSignature設定
-        Description.NumParameters = 1;
-        Description.pParameters = &RootParameter;
-        Description.NumStaticSamplers = 0;
-        Description.pStaticSamplers = nullptr;
+        Description.NumParameters = 2;
+        Description.pParameters = Parameters;
+        Description.NumStaticSamplers = 1;
+        Description.pStaticSamplers = &Sampler;
         Description.Flags =
             D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
 
@@ -411,6 +455,8 @@ float4 PSMain(VSOutput input) : SV_TARGET
         );
         if (SUCCEEDED(Result))
         {
+            SharedPipeline.WhiteTexture = std::make_shared<Texture2D>();
+            if (!SharedPipeline.WhiteTexture->CreateWhiteTexture(dx12)) return false;
             SharedPipeline.RootSignature = RootSignature;
             return true;
         }

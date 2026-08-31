@@ -88,6 +88,12 @@ namespace Engine
         bool Initialize(DirectX12& dx12) override;
 
         void SetColor(const DirectX::XMFLOAT4& color);
+        bool SetTexture(DirectX12& dx12, const std::wstring& path);
+        void GetBounds(DirectX::XMFLOAT3& center, float& radius) const;
+        std::size_t GetTriangleCount() const { return Indices.size() / 3; }
+        const std::wstring& GetSourcePath() const { return SourceOBJPath; }
+        const std::wstring& GetTexturePath() const { return SourceTexturePath; }
+        void DrawWithTransform(const RenderContext& context, const DirectX::XMMATRIX& world);
 
         //Modelの時間依存情報を更新する
         //引数: deltaTime 前回更新からの秒数

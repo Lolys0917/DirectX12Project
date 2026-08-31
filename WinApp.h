@@ -83,6 +83,7 @@ namespace Engine
 
         HWND GetHWND() const;
         HWND GetRenderHwnd() const;
+        HWND GetPreviewHwnd() const { return PreviewImageHwnd; }
         HINSTANCE GetInstance() const;
         uint32_t GetWidth() const;
         uint32_t GetHeight() const;
@@ -277,7 +278,10 @@ namespace Engine
         void RebuildSceneSelector();
         void UpdateObjectInspector();
         void ApplyObjectInspector();
+        void UpdateScriptInspector();
+        void ApplySelectedScriptMember();
         const EditorObjectInfo* GetSelectedObjectInfo() const;
+        const EditorComponentInfo* GetSelectedComponentInfo() const;
         const EditorSceneInfo* GetSelectedSceneInfo() const;
 
         // 選択中Tabに合わせてControlの表示状態を切り替える
@@ -310,6 +314,27 @@ namespace Engine
         // EngineAPIへ渡す操作要求をQueueへ追加する
         // command: 追加するEditor操作
         void QueueEditorCommand(EditorCommand command);
+
+        bool InitializeAssetWorkspace();
+        void RefreshAssetFiles(bool visualScripts);
+        void LoadSelectedAsset();
+        void SaveCurrentAsset();
+        void CreateAsset();
+        void DeleteCurrentAsset();
+        bool CreateAssetPreviewControls();
+        void LayoutAssetPreviewControls(int left, int top, int width, int bottom);
+        void LayoutPlaybackSettings(int left, int top, int width, int bottom);
+        void SetAssetPreviewVisibility();
+        bool HandleAssetPreviewCommand(int id, int notification);
+        void RefreshMediaAssets(const std::filesystem::path& preferred = {});
+        void ImportMediaAssets();
+        void SelectMediaAsset();
+        void QueuePreviewView();
+        void ApplyPlaybackSettings(bool reset = false);
+        void LoadPlaybackSettings();
+        void SavePlaybackSettings();
+        void UpdatePlaybackSettingEdits();
+        void UpdateMediaTarget();
 
         RECT GetEngineSplitterRect() const;
         RECT GetProgramHorizontalSplitterRect() const;
@@ -360,6 +385,21 @@ namespace Engine
         };
 
     private:
+        static constexpr int PlaybackValueCount = 11;
+        HWND PlaybackValueLabels[PlaybackValueCount]{};
+        HWND PlaybackValueEdits[PlaybackValueCount]{};
+        HWND PlaybackApplyButton = nullptr, PlaybackResetButton = nullptr;
+        HWND PlaybackHelpLabel = nullptr, GroundCheck = nullptr;
+        HWND MediaList = nullptr, MediaSearch = nullptr, MediaPathLabel = nullptr;
+        HWND MediaStatusLabel = nullptr, MediaTargetLabel = nullptr;
+        HWND MediaButtons[17]{};
+        PlaybackSettings PlaybackValues;
+        std::vector<std::filesystem::path> MediaFiles;
+        std::filesystem::path SelectedMediaPath;
+        std::filesystem::path SkyAssetPath;
+        std::filesystem::path MediaRoot;
+        float PreviewYaw = 0, PreviewPitch = 0, PreviewZoom = 1;
+        std::uint64_t LatestPreviewRequestID = 0;
         HWND Hwnd;                  // 親エディターウィンドウ
         HWND RenderHwnd;            // DX12 SwapChainを接続する左描画ウィンドウ
         HWND PanelHwnd;             // 右操作パネルの範囲管理に使う非表示コントロール
@@ -376,7 +416,18 @@ namespace Engine
         HWND ObjectParentLabelHwnd;  // 選択Objectの親表示
         HWND TransformLabelsHwnd[3]; // Position、Rotation、Scale見出し
         HWND TransformEditsHwnd[9];  // Local TransformのXYZ入力
+        HWND OrganizationLabelsHwnd[5]; // Group、Tag、Layer、Group順、Object順見出し
+        HWND OrganizationEditsHwnd[5]; // Object分類と処理順入力
+        HWND ScriptMemberListHwnd; // 選択Scriptの公開変数及び関数一覧
+        HWND ScriptMemberValueHwnd; // 選択公開変数の値入力
+        HWND ApplyScriptMemberButtonHwnd; // 公開値適用又は関数呼出Button
         HWND ApplyObjectButtonHwnd;  // Inspector内容の適用
+        HWND AssetFileListHwnd; // .asset又は.vscript一覧
+        HWND AssetEditorHwnd; // 選択Asset本文Editor
+        HWND NewAssetButtonHwnd; // Asset新規作成
+        HWND SaveAssetButtonHwnd; // Asset保存
+        HWND DeleteAssetButtonHwnd; // Asset削除
+        HWND AssetStatusLabelHwnd; // Asset種別と形式の説明
         HWND StartButtonHwnd;       // ゲーム開始ボタン
         HWND PauseButtonHwnd;       // 状態を保持する一時停止ボタン
         HWND StopButtonHwnd;        // 初期状態へ戻す停止ボタン
@@ -437,6 +488,7 @@ namespace Engine
         bool ProgramVisualRefreshPending; // 入力処理後のProgram全面再描画Message待ちの場合true
         bool SuppressProgramCharacter; // 補完確定Key由来WM_CHARを破棄する場合true
         bool EditingScriptWorkspace; // ScriptProgramsをEditorへ表示中の場合true
+        bool EditingVisualAsset; // Visual Script Asset一覧を表示中の場合true
         int ActiveTabIndex;          // 現在表示中のEditor Tab番号
         int EditorSplitDragOffset;  // Editor内分割線のドラッグ開始差
         float EngineSplitRatio;     // Engine Page高さに対するTree比率
@@ -452,6 +504,8 @@ namespace Engine
         ProgramWorkspace Programs; // Program保存、簡易判定、Background Compile
         ProgramWorkspace ScriptPrograms; // Object Script保存、Compile、DLL読込
         std::vector<std::filesystem::path> ProgramFiles; // File List Index対応Path
+        std::vector<std::filesystem::path> AssetFiles; // Asset List Index対応Path
+        std::filesystem::path CurrentAssetPath; // 現在編集中Asset
         std::filesystem::path CurrentProgramPath; // 現在Editorへ表示中のSource
         std::vector<ProgramFunctionInfo> ProgramFunctions; // Function List Index対応位置
         std::vector<std::wstring> ProgramSuggestions; // 表示中候補のList Index対応文字列
