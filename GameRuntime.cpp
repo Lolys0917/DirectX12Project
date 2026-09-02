@@ -336,6 +336,7 @@ namespace Engine
 
         bool NeedsDraw = true; //Scene出力を更新する場合true
         bool PlaybackSessionActive = false; //Stop復元用Snapshotを保持している場合true
+        auto LastEditorUpdate = std::chrono::steady_clock::now(); //停止中Viewport編集の実時間基準
 
         while (true)
         {
@@ -504,11 +505,37 @@ namespace Engine
                 DeltaTime *= ActivePlaybackSettings.TimeScale;
                 if (DeltaTime > 0)
                 {
+                    if (NativeAPI.HasExtensionUserInterface() &&
+                        Application.BeginImGuiFrame(DeltaTime))
+                    {
+                        NativeAPI.BuildExtensionUserInterface();
+                    }
                     NativeAPI.UpdateExtensions(DeltaTime);
                     Application.Update(DeltaTime);
                 }
                 NeedsDraw = true;
             }
+
+            const auto EditorUpdateTime = std::chrono::steady_clock::now();
+            if (!FrameRate.IsPlaying())
+            {
+                const float EditorDeltaTime = std::clamp(
+                    std::chrono::duration<float>(EditorUpdateTime - LastEditorUpdate).count(),
+                    0.0f,
+                    0.05f
+                );
+                if (NativeAPI.UpdateEditorNavigation(EditorDeltaTime))
+                {
+                    NeedsDraw = true;
+                }
+                if (NativeAPI.HasExtensionUserInterface() &&
+                    Application.BeginImGuiFrame(EditorDeltaTime))
+                {
+                    NativeAPI.BuildExtensionUserInterface();
+                    NeedsDraw = true;
+                }
+            }
+            LastEditorUpdate = EditorUpdateTime;
 
             if (NeedsDraw)
             {
@@ -530,8 +557,12 @@ namespace Engine
                 PublishedSnapshot = std::move(Snapshot);
             }
 
-            const std::uint32_t WaitMilliseconds = IsWindowVisible(PreviewWindow)
+            std::uint32_t WaitMilliseconds = IsWindowVisible(PreviewWindow)
                 ? std::min(50u, FrameRate.GetWaitMilliseconds()) : FrameRate.GetWaitMilliseconds();
+            if (!FrameRate.IsPlaying())
+            {
+                WaitMilliseconds = std::min(16u, WaitMilliseconds);
+            }
             std::unique_lock<std::mutex> Lock(RuntimeMutex); //要求又はFrame時刻を待つLock
             WakeCondition.wait_for(
                 Lock,

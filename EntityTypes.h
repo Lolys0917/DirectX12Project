@@ -140,6 +140,7 @@ namespace Engine
         HalfSphere, //半球オブジェクト
         Capsule, //カプセルオブジェクト
 		SkyBox, //スカイボックスオブジェクト
+        Folder, //Hierarchy整理専用の描画・更新を持たないフォルダー
         Count //オブジェクト種別数
     };
 

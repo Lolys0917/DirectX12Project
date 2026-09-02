@@ -6,6 +6,7 @@
 //||
 //||  更新内容 ::::::::::::::::::::::::::::::::
 //||
+//||  2026_09_02  v1.50  状態Monitor用Dear ImGui Widget APIを末尾追加
 //||  2026_08_20  v1.20  Object／ComponentのID直接情報取得APIを末尾追加
 //||  2026_08_19  v1.10  名前指定Capsule生成とID／名前指定寸法APIを末尾追加
 //||  2026_08_18  v1.00  新規作成
@@ -36,7 +37,8 @@ enum class EngineExternalObjectType : std::uint32_t
     Cylinder,
     HalfSphere,
     Capsule,
-    SkyBox
+    SkyBox,
+    Folder
 };
 
 enum class EngineExternalComponentType : std::uint32_t
@@ -205,6 +207,22 @@ struct EngineHostAPI final
 
     //v1.30以降。Objectの分類とGroup Scheduler順をまとめて設定する。
     bool (ENGINE_EXTENSION_CALL* SetObjectOrganization)(void* context, std::uint32_t sceneID, std::uint32_t objectID, const char* group, const char* tag, std::uint32_t layer, std::int32_t groupOrder, std::int32_t executionOrder);
+
+    //v1.40以降。Engine所有Dear ImGui Contextへ安全なWidget操作だけを転送する。
+    bool (ENGINE_EXTENSION_CALL* BeginImGuiWindow)(void* context, const char* name);
+    void (ENGINE_EXTENSION_CALL* EndImGuiWindow)(void* context);
+    void (ENGINE_EXTENSION_CALL* ImGuiText)(void* context, const char* text);
+    bool (ENGINE_EXTENSION_CALL* ImGuiButton)(void* context, const char* label);
+
+    //v1.50以降。状態Monitor用のTab、分類、負荷可視化Widget。
+    bool (ENGINE_EXTENSION_CALL* BeginImGuiTabBar)(void* context, const char* identifier);
+    void (ENGINE_EXTENSION_CALL* EndImGuiTabBar)(void* context);
+    bool (ENGINE_EXTENSION_CALL* BeginImGuiTabItem)(void* context, const char* label);
+    void (ENGINE_EXTENSION_CALL* EndImGuiTabItem)(void* context);
+    bool (ENGINE_EXTENSION_CALL* ImGuiCollapsingHeader)(void* context, const char* label, bool defaultOpen);
+    void (ENGINE_EXTENSION_CALL* ImGuiSeparator)(void* context);
+    void (ENGINE_EXTENSION_CALL* ImGuiProgressBar)(void* context, float fraction, const char* overlay);
+    void (ENGINE_EXTENSION_CALL* ImGuiPlotLines)(void* context, const char* label, const float* values, std::uint32_t valueCount, float minimum, float maximum);
 };
 
 struct EngineExtensionModuleDescriptor final
@@ -220,6 +238,9 @@ struct EngineExtensionModuleDescriptor final
     std::uint32_t (ENGINE_EXTENSION_CALL* GetStateSize)(void* instance);
     bool (ENGINE_EXTENSION_CALL* SaveState)(void* instance, void* destination, std::uint32_t destinationSize);
     bool (ENGINE_EXTENSION_CALL* LoadState)(void* instance, const void* source, std::uint32_t sourceSize);
+
+    //Descriptor Sizeで存在確認する任意の停止中対応UI構築Callback。
+    void (ENGINE_EXTENSION_CALL* BuildUserInterface)(void* instance);
 };
 
 using EngineGetExtensionModuleFunction = const EngineExtensionModuleDescriptor* (

@@ -76,7 +76,7 @@ namespace Engine
         PlaybackApplyButton = Make(WC_BUTTONW, L"設定を適用・保存", WS_TABSTOP | BS_PUSHBUTTON, ApplyID);
         PlaybackResetButton = Make(WC_BUTTONW, L"初期値に戻す", WS_TABSTOP | BS_PUSHBUTTON, ResetID);
         GroundCheck = Make(WC_BUTTONW, L"床との簡易衝突を有効にする", WS_TABSTOP | BS_AUTOCHECKBOX, GroundID);
-        PlaybackHelpLabel = Make(WC_STATICW, L"重力はEngineで「重力 / Gravity」を追加したObjectに適用。速度0は更新停止。Tickにもゲーム速度を反映します。", SS_LEFT, 0);
+        PlaybackHelpLabel = Make(WC_STATICW, L"停止／一時停止中もゲーム画面をクリックして編集可能：矢印キーでCamera、W/A/S/D/Q/Eで選択Object（Shiftで高速）。Gameplay更新は進みません。", SS_LEFT, 0);
         MediaList = Make(WC_LISTBOXW, L"", WS_TABSTOP | WS_VSCROLL | WS_HSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT, MediaListID, WS_EX_CLIENTEDGE);
         MediaSearch = Make(WC_EDITW, L"", WS_TABSTOP | ES_AUTOHSCROLL, MediaSearchID, WS_EX_CLIENTEDGE);
         SendMessageW(MediaSearch, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"ファイル名で検索（DDS / 画像 / OBJ）"));

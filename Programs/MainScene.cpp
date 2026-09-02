@@ -1,4 +1,5 @@
 #include "GameEngineAPI.h"
+#include "Main.h"
 
 #include <cmath>
 #include <cstdint>
@@ -8,8 +9,9 @@ using namespace EngineGame;
 
 namespace Game::MainScene
 {
-    constexpr std::uint32_t StressObjectCount = 50;
+    constexpr std::uint32_t StressObjectCount = 4096;
     ObjectHandle MainCapsule; //個別操作するObjectの安定Handle
+    ObjectHandle StressFolder; //大量ObjectをHierarchy上でまとめるFolder
     std::vector<ObjectHandle> StressObjects; //一括操作するObject Handle配列
     float ElapsedTime = 0.0f; //Initで再生ごとに初期化するScene状態
 
@@ -27,8 +29,18 @@ namespace Game::MainScene
         MainCapsule.SetPosition(3.0f, 1.0f, 2.0f);
         MainCapsule.SetColor(0.95f, 0.4f, 0.18f);
 
-        //宣言数と前世代のObject集合を差分同期する。余剰分は削除せず無効化される。
-        StressObjects = AddObject.CreateBoxes("StressBox", StressObjectCount);
+        StressFolder = Object.Find("Stress Objects");
+        if (!StressFolder)
+        {
+            StressFolder = AddObject.CreateFolder("Stress Objects");
+        }
+
+        //宣言数と前世代のObject集合を差分同期し、Folder配下へまとめて一覧を簡潔に保つ。
+        StressObjects = AddObject.CreateBoxes(
+            "StressBox",
+            StressObjectCount,
+            StressFolder.GetID()
+        );
 
         for (std::size_t Index = 0; Index < StressObjects.size(); ++Index)
         {
@@ -48,15 +60,15 @@ namespace Game::MainScene
 
         for (std::size_t Index = 0; Index < StressObjects.size(); ++Index)
         {
-            const float Column = static_cast<float>(Index % 8);
-            const float Row = static_cast<float>(Index / 8);
-            const float Height = 0.5f + std::sin(
+            const float Column = static_cast<float>(Index % 36);
+            const float Row = static_cast<float>(Index / 36);
+            const float Height = -4 + std::sin(
                 ElapsedTime * 2.0f + static_cast<float>(Index) * 0.25f
             ) * 0.75f;
             StressObjects[Index].SetPosition(
-                (Column - 3.5f) * 1.1f,
+                (Column - 15) * 1.1f,
                 Height,
-                5.0f + Row * 1.1f
+                -10 + Row * 1.1f
             );
         }
     }
@@ -64,6 +76,7 @@ namespace Game::MainScene
     void StartDestroy()
     {
         MainCapsule = {};
+        StressFolder = {};
         StressObjects.clear();
     }
 

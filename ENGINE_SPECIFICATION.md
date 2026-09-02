@@ -1,12 +1,13 @@
 # DirectX 12 エンジン基盤仕様
 
-更新日: 2026-08-20
+更新日: 2026-09-02
 
 ## 1. 設計方針
 
 本基盤は、Object がゲーム世界上の実体と姿勢を持ち、機能を Component として保持する構成とする。
 
 - `Object`: 名前、ID、Position、Rotation、Scale、Component 所有権を持つ。
+- `ObjectFolder`: 描画や更新を持たず、Hierarchy上で子Objectをまとめる整理専用Objectとする。
 - `PrimitiveObject`: 頂点形状を持つ基本 Object の親クラス。
 - `Box`、`Sphere`、`Plane`、`Cylinder`、`HalfSphere`、`Capsule`: `PrimitiveObject` を継承する。
 - `Camera`、`Grid`、`Polygon`、`Model`、`Collider`: `Component` を継承する。
@@ -69,7 +70,7 @@ Component は `OwnerObjectID × ComponentType × ResolvedName = ComponentID` で
 
 Script Componentは `OnAttach`、`OnStart`、`OnUpdate`、`OnStop`、`OnDetach` の順序を保証する。Object又はScriptが非Activeの場合は `OnUpdate` を呼ばない。実行中に追加したScriptは `Scene::InitializePendingComponents` により次の更新前に初期化する。
 
-Main ProgramはConstructor／Destructorではなく`Init`、`Update`、`End`を高水準Lifecycleとする。順序依存の参照解除が必要なSceneは任意の`StartDestroy`と`EndDestroy`を持てる。全Sceneの`StartDestroy`を登録順、`End`を逆登録順、`EndDestroy`を逆登録順で実行する。
+Main ProgramはConstructor／Destructorではなく`Init`、`Update`、`End`を高水準Lifecycleとする。共通`Programs/Main.cpp`を全Scene Programの外側に1つ置き、`Main::Init`から`InitializeScenes`、`Main::Update`から`RunScenes`又は`RunScene`を呼ぶ。これによりSceneごとのCPPを維持したまま共通変数、共通関数、Scene更新順をMainへ集約する。順序依存の参照解除が必要なSceneは任意の`StartDestroy`と`EndDestroy`を持てる。全Sceneの`StartDestroy`を登録順、`End`を逆登録順、`EndDestroy`を逆登録順で実行し、最後に共通Mainの`End`を実行する。
 
 派生Componentの終了処理は固有GPU Resource又はDLL Instanceを解放した後に `Component::Finalize` を呼ぶ。Renderable ObjectはActive状態に関係なく登録時にGPU Resourceを初期化する。これにより、非Active状態で複製したObjectを後からActiveにしても未初期化Resourceを描画しない。
 
@@ -126,9 +127,11 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 
 同一 CommandListへ複数 Camera passを記録するため、Grid、OBJModel、VertexMesh のCamera別WVPは永続Mapした単一ConstantBufferへ書き込まない。各 Draw の値を Root Constants としてCommandListへ直接記録し、後続Cameraによる上書きを防ぐ。
 
-## 7. Windows 標準 UI
+## 7. Editor UI と Dear ImGui
 
-外部 UI ライブラリは使用しない。Win32 と Windows Common Controls のみを使用する。
+Editor本体のパネル、Tree、TabはWin32とWindows Common Controlsで構築する。外部Main ProgramからゲームViewportへ機能UIを追加する試験入口として、EngineがDear ImGui ContextとDirectX 12 Backendを一元所有する。DLL境界にはImGui型やContextを公開せず、`GameEngineAPI.h`の安全なWidget Wrapperだけを渡す。
+
+ゲームViewportの標準外部Monitorは`Game State`と`PC State`のTabへ分ける。前者はScene、Object、Component、Script、Transform、Frame timeを、後者はSystem／Engine ProcessのCPU、物理Memory、Working Set、Private Memory、Thread、Handleを表示する。大量Objectの全状態集計とPC計測は0.5秒間隔でCacheし、履歴Graph表示が監視対象の処理負荷を不必要に増やさないようにする。
 
 - 左: DXGI swap chain の対象となる子 viewport。`ViewScene` の RenderTexture を表示する。
 - 中央: ドラッグ可能な splitter。左右の最小幅を守って配置を変更する。
@@ -136,7 +139,7 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 - Engine Tab: Scene→Object→Component／ScriptのTree、Object追加、Script差込、DLL読込ボタン。
 - 再生Tab: `UIDemo.png`、Start／Resume、Pause、Stop、Tick、FPS Edit、FPS Trackbar。
 - ログTab: ログ一覧、一括消去ボタン。
-- メインTab: `Programs/` のC++を編集し、各フレームでScene／Object／Sub Scriptより先に実行する全体制御DLLを生成する。
+- メインTab: `Programs/` の共通`Main.cpp`とScene別CPPを編集し、各フレームでScene／Object／Sub Scriptより先に実行する全体制御DLLを生成する。
 - スクリプトTab: `ScriptPrograms/` のC++を編集し、Objectへ差し込むUnityのScript相当のDLLを生成する。
 - 右操作領域は、上段を Start / Pause / Stop / Tick と状態表示、中央を UIDemo と FPS 設定、下段をメッセージログとして配置する。
 - 右パネルの範囲管理用Windowは描画せず、機能コントロールを親Editor Window上の前面へ明示的に固定して背景に隠れないようにする。
@@ -151,8 +154,9 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 - Stop: Updateを停止し、Scene定義を再生開始直前へ戻してMain Programを再生成する。
 - Tick: Stop又はPause中に`1 / TargetFPS`秒だけ1回Updateする。Stop直後のTickは先に復元状態をSnapshot化する。
 - Keyboard入力は描画ViewportがFocusを持つ場合だけ有効とする。Viewportクリック時はEditor／TabからFocusを移す。
+- Stop又はPause中も描画Viewportをクリックして、矢印キーでPrimary Camera、`W/A/S/D/Q/E`でHierarchy選択中Objectを移動できる。`Shift`は移動速度を4倍にする。Folder自体は移動対象にしない。
 - Edit と Trackbar の値は常に同期し、範囲外値はクランプする。
-- Tree空白又はSceneの右クリックはObject追加、DLL読込、更新を提供する。
+- Tree空白又はSceneの右クリックはObject追加、Folder追加、DLL読込、更新を提供する。ObjectをFolderへドラッグすると既存の親子APIで格納し、Folderを閉じれば大量Objectを1行へ畳める。
 - Objectの右クリックはScript差込、複製、名前変更、有効切替、削除を提供する。
 - Component又はScriptの右クリックは名前変更、有効切替、削除を提供する。
 - Primary Camera Object及びPrimary Camera Componentの削除は描画出力維持のため拒否する。
@@ -195,7 +199,7 @@ Scene の代表出力は PrimaryCamera の RenderTexture とする。他 Camera 
 
 ## 11. Main／Subプログラム境界
 
-通常のMainプログラムは `GameEngineAPI.h` を入口とし、Sceneごとの一つのCPPへ `Init`、`Update`、`End`を実装する。Object生成と設定はScene内一意名を使う高級APIを標準とし、DLL Export、Instance、Scene ID解決は固定Adapterへ隠す。上級者は`Advanced.Host()`から`EngineHostAPI`へ降り、Scene、Object、Component、Script Registry相当の詳細操作を組み合わせられる。毎フレームの順序は `Main Program → Active Scene → Object／Component／Sub Script` とする。
+通常のMainプログラムは `GameEngineAPI.h` を入口とし、共通`Main.cpp`とSceneごとのCPPに分ける。共通Mainは全体状態、全体関数、Scene呼出順を持ち、Scene CPPは`Init`、`Update`、`End`で固有処理を保つ。Object生成と設定はScene内一意名を使う高級APIを標準とし、DLL Export、Instance、Scene ID解決は固定Adapterへ隠す。上級者は`Advanced.Host()`から`EngineHostAPI`へ降り、Scene、Object、Component、Script Registry相当の詳細操作を組み合わせられる。毎フレームの順序は `共通Main → Active Scene → Object／Component／Sub Script` とする。
 
 Subプログラムは `Script` 派生Componentであり、EditorのEngine TabからObjectへ差し込む。Native ScriptとDLL Scriptは同じComponent ID、Active状態、初期化、複製、削除経路を使う。
 

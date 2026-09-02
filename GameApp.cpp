@@ -28,6 +28,7 @@ namespace Engine
     // 未初期化のApplicationを作成する
     GameApp::GameApp()
         : Graphics()
+        , ImmediateUI()
         , Scenes()
         , PlaybackSnapshot()
         , RenderWindow(nullptr)
@@ -78,6 +79,12 @@ namespace Engine
 
         DirectX12& GraphicsDevice =
             Graphics.GetDirectX12(); // SceneとComponentが共有する描画基盤
+        if (!ImmediateUI.Initialize(GraphicsDevice, hwnd))
+        {
+            MessageLog::GetInstance().AddLog(
+                "[Warning] GameApp | Dear ImGui layer could not be initialized."
+            );
+        }
         const SceneID MainSceneID = Scenes.CreateMainScene<MainScene>(
             GraphicsDevice,
             "MainScene",
@@ -111,6 +118,7 @@ namespace Engine
         RenderWindow = nullptr;
         PlaybackSnapshot.reset();
         Scenes.Finalize();
+        ImmediateUI.Finalize();
         Graphics.Finalize();
         Initialized = false;
     }
@@ -148,6 +156,7 @@ namespace Engine
 
         if (!GraphicsDevice.IsFrameOpen())
         {
+            ImmediateUI.CancelFrame();
             MessageLog::GetInstance().AddLog(
                 "[Error] GameApp | Draw was skipped because BeginFrame failed."
             );
@@ -166,6 +175,8 @@ namespace Engine
             );
             GraphicsDevice.BindBackBuffer();
         }
+
+        ImmediateUI.Render(GraphicsDevice);
 
         GraphicsDevice.EndFrame();
     }
@@ -276,5 +287,76 @@ namespace Engine
     const DirectX12& GameApp::GetDirectX12() const
     {
         return Graphics.GetDirectX12();
+    }
+
+    bool GameApp::BeginImGuiFrame(float deltaTime)
+    {
+        return Initialized && ImmediateUI.BeginFrame(deltaTime);
+    }
+
+    bool GameApp::BeginImGuiWindow(const char* name)
+    {
+        return ImmediateUI.BeginWindow(name);
+    }
+
+    void GameApp::EndImGuiWindow()
+    {
+        ImmediateUI.EndWindow();
+    }
+
+    void GameApp::ImGuiText(const char* text)
+    {
+        ImmediateUI.Text(text);
+    }
+
+    bool GameApp::ImGuiButton(const char* label)
+    {
+        return ImmediateUI.Button(label);
+    }
+
+    bool GameApp::BeginImGuiTabBar(const char* identifier)
+    {
+        return ImmediateUI.BeginTabBar(identifier);
+    }
+
+    void GameApp::EndImGuiTabBar()
+    {
+        ImmediateUI.EndTabBar();
+    }
+
+    bool GameApp::BeginImGuiTabItem(const char* label)
+    {
+        return ImmediateUI.BeginTabItem(label);
+    }
+
+    void GameApp::EndImGuiTabItem()
+    {
+        ImmediateUI.EndTabItem();
+    }
+
+    bool GameApp::ImGuiCollapsingHeader(const char* label, bool defaultOpen)
+    {
+        return ImmediateUI.CollapsingHeader(label, defaultOpen);
+    }
+
+    void GameApp::ImGuiSeparator()
+    {
+        ImmediateUI.Separator();
+    }
+
+    void GameApp::ImGuiProgressBar(float fraction, const char* overlay)
+    {
+        ImmediateUI.ProgressBar(fraction, overlay);
+    }
+
+    void GameApp::ImGuiPlotLines(
+        const char* label,
+        const float* values,
+        std::uint32_t valueCount,
+        float minimum,
+        float maximum
+    )
+    {
+        ImmediateUI.PlotLines(label, values, valueCount, minimum, maximum);
     }
 }

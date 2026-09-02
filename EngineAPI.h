@@ -144,6 +144,28 @@ namespace Engine
             const std::string& scriptKey
         );
         void UpdateExtensions(float deltaTime);
+        bool BuildExtensionUserInterface();
+        bool HasExtensionUserInterface() const;
+        bool BeginImGuiWindow(const char* name);
+        void EndImGuiWindow();
+        void ImGuiText(const char* text);
+        bool ImGuiButton(const char* label);
+        bool BeginImGuiTabBar(const char* identifier);
+        void EndImGuiTabBar();
+        bool BeginImGuiTabItem(const char* label);
+        void EndImGuiTabItem();
+        bool ImGuiCollapsingHeader(const char* label, bool defaultOpen);
+        void ImGuiSeparator();
+        void ImGuiProgressBar(float fraction, const char* overlay);
+        void ImGuiPlotLines(
+            const char* label,
+            const float* values,
+            std::uint32_t valueCount,
+            float minimum,
+            float maximum
+        );
+        //停止中にGameplay Updateを進めずViewportのCamera／選択Objectだけを編集移動する
+        bool UpdateEditorNavigation(float deltaTime);
         bool CapturePlaybackState();
         bool RestorePlaybackState();
         bool ExecuteEditorCommand(const EditorCommand& command);
@@ -172,6 +194,8 @@ namespace Engine
         ScriptRegistry Scripts; //NativeとDLL Script Factory Registry
         ScriptModuleManager Modules; //DLL Handleと関数表の寿命管理器
         ExtensionModuleManager Extensions; //Program DLL Hot Reloadと外部API管理器
+        SceneID EditorSelectionScene; //Viewport編集移動の選択Scene
+        ObjectID EditorSelectionObject; //Viewport編集移動の選択Object
         std::uint64_t Revision; //Editor構造変更番号
         std::unordered_set<std::uint64_t> KnownProgramObjects; //過去にProgramが作成した再利用可能Object
         std::unordered_set<std::uint64_t> ManagedProgramObjects; //前世代が宣言したObject

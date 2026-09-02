@@ -41,6 +41,8 @@ namespace Engine
         void DestroyInstance();
         bool CreateInstance();
         void Update(float deltaTime);
+        bool BuildUserInterface();
+        bool HasUserInterface() const;
         bool IsLoaded() const;
         std::uint64_t GetGeneration() const;
         std::uint64_t GetFrameNumber() const;

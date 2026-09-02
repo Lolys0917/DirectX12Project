@@ -1,10 +1,10 @@
 # ゲーム組み込みAPI説明
 
-更新日: 2026-08-20
+更新日: 2026-09-02
 
 ## MainとSubの違い
 
-Main Programは`Programs/`からDLL化され、各固定フレームの最初に1回実行されます。Scene作成、Object作成、検索、Transform、色、親子関係、Component、ScriptのAttachなど、ゲーム全体を操作します。
+Main Programは`Programs/`からDLL化されます。共通`Main.cpp`が各固定フレームの最初に1回実行され、そこからScene別CPPを呼びます。Scene作成、Object作成、検索、Transform、色、親子関係、Component、ScriptのAttachなど、ゲーム全体を操作します。
 
 Sub Scriptは`ScriptPrograms/`からDLL化され、必ずObjectへAttachして使用します。AttachされていないSub Scriptは実行されません。処理順は`OnAttach`、`OnStart`、毎フレームの`Update`、`OnStop`、`OnDetach`です。
 
@@ -65,7 +65,48 @@ Main Programでは同じ機能を`SetObjectColor`と`MultiplyObjectColor`から�
 
 `EngineExtensionAPI.h`の`EngineHostAPI`は追記専用のC ABI関数表です。Scene、Object、Component、Scriptの列挙・作成・検索・編集に加え、Transform、親子関係、絶対色、乗算色、Keyboard入力を外部DLLから操作できます。
 
-通常のMain ProgramはSceneごとに一つのCPPを持ち、`Init`、`Update`、`End`を実装します。`GameEngineAPI.h`の組込みAPIへObject名を渡すと、Scene内で一意な安定IDへ内部解決されます。
+通常のMain Programは共通`Main.cpp`を一つ持ち、さらにSceneごとに一つのCPPを持ちます。共通Mainは`Init`、`Update`、`End`、`UserInterface`、Scene側は`Init`、`Update`、`End`を実装します。`GameEngineAPI.h`の組込みAPIへObject名を渡すと、Scene内で一意な安定IDへ内部解決されます。
+
+```cpp
+namespace Game::Main
+{
+    void Init()
+    {
+        InitializeScene("TitleScene"); //必要なら初期化も明示順
+        InitializeScenes();            //未初期化Sceneを登録順で初期化
+    }
+
+    void Update(float deltaTime)
+    {
+        RunScene("TitleScene", deltaTime); //必要なら明示順
+        RunScenes(deltaTime);              //未更新Sceneを登録順で実行
+    }
+
+    void End() {}
+
+    void UserInterface()
+    {
+        const bool Visible = ImGui.Begin("Game Tools");
+        if (Visible && ImGui.BeginTabBar("StatusTabs"))
+        {
+            if (ImGui.BeginTabItem("Game State"))
+            {
+                ImGui.Text("Scene / Object status");
+                ImGui.EndTabItem();
+            }
+            if (ImGui.BeginTabItem("PC State"))
+            {
+                ImGui.Text("CPU / memory status");
+                ImGui.EndTabItem();
+            }
+            ImGui.EndTabBar();
+        }
+        ImGui.End();
+    }
+}
+
+ENGINE_REGISTER_MAIN(Main)
+```
 
 Object生成関数は数値IDではなく`ObjectHandle`を返します。HandleはScene IDとObject IDを保持する非所有参照なので、変数や`std::vector`へ保存できます。Engine内部の生PointerをDLLへ公開しないため、再生停止時のScene復元やHot Reload後に古いPointerを誤参照しません。取得済みHandleの情報読取はID索引から直接行います。
 
@@ -86,7 +127,8 @@ namespace Game::MainScene
         Player = AddObject.CreateCapsuleModel("PlayerCapsule");
         Player.SetSize(1.0f, 2.0f, 1.0f);
 
-        Enemies = AddObject.CreateBoxes("Enemy", 100);
+        ObjectHandle EnemyFolder = AddObject.CreateFolder("Enemies");
+        Enemies = AddObject.CreateBoxes("Enemy", 100, EnemyFolder.GetID());
     }
 
     void Update(float deltaTime)
@@ -103,9 +145,10 @@ namespace Game::MainScene
 ENGINE_REGISTER_SCENE(MainScene)
 ```
 
-主な入口は`AddObject`、`Object`、`Scene`、`Input`、`Log`です。
+主な入口は`AddObject`、`Object`、`Scene`、`Input`、`ImGui`、`Log`です。
 
 - `AddObject.Create...`: 1個生成して`ObjectHandle`を返します。
+- `AddObject.CreateFolder`: Hierarchy整理用の非描画Folderを生成します。
 - `AddObject.CreateMany`、`CreateBoxes`、`CreateCapsules`: まとめて生成し`std::vector<ObjectHandle>`を返します。
 - `Object.Find("ExactName")`: 一意名から1個を取得します。
 - `Object.FindAll("NamePart")`: 名前の一部が一致する全Objectを取得します。既定では大文字小文字を区別しません。
@@ -113,6 +156,9 @@ ENGINE_REGISTER_SCENE(MainScene)
 - `Object.FindByComponent(...)`: 指定ComponentクラスがAttachされたObjectを取得します。
 - `Object.FindByScript("script.key")`: 指定ScriptがAttachされたObjectを取得します。
 - `ObjectHandle.GetComponent(...)`、`GetComponents(...)`: `ComponentHandle`を1個又は配列で取得します。
+- `ImGui.BeginTabBar`、`BeginTabItem`: Game State、PC Stateなどの表示分類を作ります。戻り値がtrueのときだけ対応する`EndTabBar`、`EndTabItem`を呼びます。
+- `ImGui.CollapsingHeader`: Tab内を概要、Scene、Object、System、Processなどへ折り畳み分類します。
+- `ImGui.ProgressBar`、`PlotLines`: CPU、Memory、Frame timeの現在値と履歴を描画します。
 
 ```cpp
 const auto NamedEnemies = Object.FindAll("Enemy");
@@ -129,7 +175,7 @@ for (const ObjectHandle& Object : CameraObjects)
 }
 ```
 
-個別Objectを簡潔に操作したい場合は`Object.SetPosition("Player", ...)`のような名前指定APIも引き続き利用できます。`ObjectHandle`には`SetSize`、`SetPosition`、`SetTransform`、`Move`、`SetColor`、`MultiplyColor`、`SetActive`、`AttachScript`、`Remove`があります。
+個別Objectを簡潔に操作したい場合は`Object.SetPosition("Player", ...)`のような名前指定APIも引き続き利用できます。`ObjectHandle`には`SetSize`、`SetPosition`、`SetTransform`、`Move`、`SetParent`、`ClearParent`、`SetColor`、`MultiplyColor`、`SetActive`、`AttachScript`、`Remove`があります。
 
 上級者は次の入口から低Level C ABI関数表を直接利用できます。
 
@@ -159,6 +205,8 @@ void EndDestroy() { /* 全SceneのEnd後に行う最終解放 */ }
 
 Keyboard入力はゲーム画面がFocusを持つ間だけ有効です。ゲーム画面をクリックするとProgram／TabからFocusが移り、Editor側のShortcutが同時に動作しません。
 
+停止又は一時停止中も、矢印キーでView SceneのPrimary Cameraを移動できます。HierarchyでObjectを選択してから`W/A/S/D/Q/E`を押すとX/Z/Y軸へ移動し、`Shift`を押しながら操作すると4倍速になります。Folder自体は移動しません。この操作はゲームの`Update`を進めず、編集結果としてその場で描画されます。
+
 ## 描画更新の扱い
 
 位置、回転、ScaleはObjectの行列だけを更新します。同じ寸法や色を再指定した場合は何もしません。色変更は頂点Bufferを再作成・上書きせずDraw単位のRoot Constantsへ反映し、同一Device上のPrimitiveはRoot SignatureとPipeline Stateを共有します。形状の寸法や分割数が変わった場合だけMeshを再構築します。
@@ -170,4 +218,4 @@ Program Editorでは`AddObject.`、`Object.`などの`.`入力直後に、その
 - `OscillatingBox`: MainSceneが作成し、`box.horizontal_oscillation` Sub Scriptを自動Attachします。水色を直接設定後に色係数を乗算し、X軸の左右へ往復します。
 - `MainOscillatingCapsule`: `Programs/MainScene.cpp`の`Init`が名前指定で作成します。橙色を直接設定後に色係数を乗算し、`Update`からZ軸の前後へ往復します。
 
-実装例は`ScriptPrograms/BoxKeyboardColorScript.cpp`と`Programs/MainScene.cpp`にあります。
+実装例は`Programs/Main.cpp`、`Programs/MainScene.cpp`、`ScriptPrograms/BoxKeyboardColorScript.cpp`にあります。`MainScene`の大量Boxは`Stress Objects` Folder配下へまとめています。

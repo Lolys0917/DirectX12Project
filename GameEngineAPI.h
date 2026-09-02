@@ -557,6 +557,35 @@ namespace EngineGame
                 );
         }
 
+        //Hierarchy上の親を変更する。Folder Handleを渡すとObjectをFolderへ格納できる。
+        bool SetParent(
+            const ObjectHandle& parent,
+            bool keepWorldTransform = true
+        ) const
+        {
+            return Host != nullptr && ObjectID != 0 &&
+                Host->SetObjectParent != nullptr &&
+                (parent.GetID() == 0 || parent.GetSceneID() == SceneID) &&
+                Host->SetObjectParent(
+                    Host->Context,
+                    SceneID,
+                    ObjectID,
+                    parent.GetID(),
+                    keepWorldTransform
+                );
+        }
+
+        bool ClearParent(bool keepWorldTransform = true) const
+        {
+            return SetParent(ObjectHandle(), keepWorldTransform);
+        }
+
+        std::uint32_t GetParentID() const
+        {
+            EngineExternalObjectInfo Information{};
+            return TryGetInfo(Information) ? Information.ParentObjectID : 0u;
+        }
+
         bool SetOrganization(
             const std::string& group,
             const std::string& tag = "Untagged",
@@ -703,10 +732,16 @@ namespace EngineGame
             return Create(EngineExternalObjectType::Cylinder, name);
         }
 
+        ObjectHandle CreateFolder(const std::string& name) const
+        {
+            return Create(EngineExternalObjectType::Folder, name);
+        }
+
         std::vector<ObjectHandle> CreateMany(
             EngineExternalObjectType type,
             const std::string& baseName,
-            std::uint32_t count
+            std::uint32_t count,
+            std::uint32_t parentObjectID = 0
         ) const
         {
             std::vector<ObjectHandle> Result;
@@ -731,12 +766,22 @@ namespace EngineGame
                 }
 
                 ObjectHandle Created = ExistingID == 0
-                    ? Create(type, Name)
+                    ? Create(type, Name, parentObjectID)
                     : ObjectHandle(Host, SceneID, ExistingID);
 
                 if (Created.GetID() != 0)
                 {
                     Created.SetActive(true);
+                    if (parentObjectID != 0 && Host->SetObjectParent != nullptr)
+                    {
+                        Host->SetObjectParent(
+                            Host->Context,
+                            SceneID,
+                            Created.GetID(),
+                            parentObjectID,
+                            true
+                        );
+                    }
                     Result.emplace_back(Created);
                 }
             }
@@ -857,12 +902,14 @@ namespace EngineGame
     public:
         ObjectHandle Create(
             EngineExternalObjectType type,
-            const std::string& name
+            const std::string& name,
+            std::uint32_t parentObjectID = 0
         ) const
         {
             return AddObjectAPI(Detail::ActiveHost, Detail::ActiveSceneID).Create(
                 type,
-                name
+                name,
+                parentObjectID
             );
         }
 
@@ -894,24 +941,36 @@ namespace EngineGame
             return Create(EngineExternalObjectType::Cylinder, name);
         }
 
+        ObjectHandle CreateFolder(const std::string& name) const
+        {
+            return Create(EngineExternalObjectType::Folder, name);
+        }
+
         std::vector<ObjectHandle> CreateMany(
             EngineExternalObjectType type,
             const std::string& baseName,
-            std::uint32_t count
+            std::uint32_t count,
+            std::uint32_t parentObjectID = 0
         ) const
         {
             return AddObjectAPI(
                 Detail::ActiveHost,
                 Detail::ActiveSceneID
-            ).CreateMany(type, baseName, count);
+            ).CreateMany(type, baseName, count, parentObjectID);
         }
 
         std::vector<ObjectHandle> CreateBoxes(
             const std::string& baseName,
-            std::uint32_t count
+            std::uint32_t count,
+            std::uint32_t parentObjectID = 0
         ) const
         {
-            return CreateMany(EngineExternalObjectType::Box, baseName, count);
+            return CreateMany(
+                EngineExternalObjectType::Box,
+                baseName,
+                count,
+                parentObjectID
+            );
         }
 
         std::vector<ObjectHandle> CreateCapsules(
@@ -1364,6 +1423,181 @@ namespace EngineGame
         }
     };
 
+    //Engine所有Dear ImGuiへDLL境界を越えて基本Widgetを追加するAPI
+    class ImGuiAPI final
+    {
+    public:
+        bool Begin(const std::string& name) const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, BeginImGuiWindow) +
+                sizeof(decltype(EngineHostAPI::BeginImGuiWindow));
+            return Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->BeginImGuiWindow != nullptr &&
+                Detail::ActiveHost->BeginImGuiWindow(
+                    Detail::ActiveHost->Context,
+                    name.c_str()
+                );
+        }
+
+        void End() const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, EndImGuiWindow) +
+                sizeof(decltype(EngineHostAPI::EndImGuiWindow));
+            if (Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->EndImGuiWindow != nullptr)
+            {
+                Detail::ActiveHost->EndImGuiWindow(Detail::ActiveHost->Context);
+            }
+        }
+
+        void Text(const std::string& text) const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, ImGuiText) +
+                sizeof(decltype(EngineHostAPI::ImGuiText));
+            if (Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->ImGuiText != nullptr)
+            {
+                Detail::ActiveHost->ImGuiText(Detail::ActiveHost->Context, text.c_str());
+            }
+        }
+
+        bool Button(const std::string& label) const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, ImGuiButton) +
+                sizeof(decltype(EngineHostAPI::ImGuiButton));
+            return Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->ImGuiButton != nullptr &&
+                Detail::ActiveHost->ImGuiButton(
+                    Detail::ActiveHost->Context,
+                    label.c_str()
+                );
+        }
+
+        bool BeginTabBar(const std::string& identifier) const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, BeginImGuiTabBar) +
+                sizeof(decltype(EngineHostAPI::BeginImGuiTabBar));
+            return Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->BeginImGuiTabBar != nullptr &&
+                Detail::ActiveHost->BeginImGuiTabBar(
+                    Detail::ActiveHost->Context,
+                    identifier.c_str()
+                );
+        }
+
+        void EndTabBar() const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, EndImGuiTabBar) +
+                sizeof(decltype(EngineHostAPI::EndImGuiTabBar));
+            if (Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->EndImGuiTabBar != nullptr)
+            {
+                Detail::ActiveHost->EndImGuiTabBar(Detail::ActiveHost->Context);
+            }
+        }
+
+        bool BeginTabItem(const std::string& label) const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, BeginImGuiTabItem) +
+                sizeof(decltype(EngineHostAPI::BeginImGuiTabItem));
+            return Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->BeginImGuiTabItem != nullptr &&
+                Detail::ActiveHost->BeginImGuiTabItem(
+                    Detail::ActiveHost->Context,
+                    label.c_str()
+                );
+        }
+
+        void EndTabItem() const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, EndImGuiTabItem) +
+                sizeof(decltype(EngineHostAPI::EndImGuiTabItem));
+            if (Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->EndImGuiTabItem != nullptr)
+            {
+                Detail::ActiveHost->EndImGuiTabItem(Detail::ActiveHost->Context);
+            }
+        }
+
+        bool CollapsingHeader(
+            const std::string& label,
+            bool defaultOpen = false
+        ) const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, ImGuiCollapsingHeader) +
+                sizeof(decltype(EngineHostAPI::ImGuiCollapsingHeader));
+            return Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->ImGuiCollapsingHeader != nullptr &&
+                Detail::ActiveHost->ImGuiCollapsingHeader(
+                    Detail::ActiveHost->Context,
+                    label.c_str(),
+                    defaultOpen
+                );
+        }
+
+        void Separator() const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, ImGuiSeparator) +
+                sizeof(decltype(EngineHostAPI::ImGuiSeparator));
+            if (Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->ImGuiSeparator != nullptr)
+            {
+                Detail::ActiveHost->ImGuiSeparator(Detail::ActiveHost->Context);
+            }
+        }
+
+        void ProgressBar(float fraction, const std::string& overlay = {}) const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, ImGuiProgressBar) +
+                sizeof(decltype(EngineHostAPI::ImGuiProgressBar));
+            if (Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->ImGuiProgressBar != nullptr)
+            {
+                Detail::ActiveHost->ImGuiProgressBar(
+                    Detail::ActiveHost->Context,
+                    fraction,
+                    overlay.empty() ? nullptr : overlay.c_str()
+                );
+            }
+        }
+
+        void PlotLines(
+            const std::string& label,
+            const std::vector<float>& values,
+            float minimum,
+            float maximum
+        ) const
+        {
+            constexpr std::size_t MemberEnd =
+                offsetof(EngineHostAPI, ImGuiPlotLines) +
+                sizeof(decltype(EngineHostAPI::ImGuiPlotLines));
+            if (!values.empty() &&
+                Detail::HasHostMember(Detail::ActiveHost, MemberEnd) &&
+                Detail::ActiveHost->ImGuiPlotLines != nullptr)
+            {
+                Detail::ActiveHost->ImGuiPlotLines(
+                    Detail::ActiveHost->Context,
+                    label.c_str(),
+                    values.data(),
+                    static_cast<std::uint32_t>(values.size()),
+                    minimum,
+                    maximum
+                );
+            }
+        }
+    };
+
     class AdvancedAPI final
     {
     public:
@@ -1382,6 +1616,7 @@ namespace EngineGame
     inline const ObjectAPI Object; //名前指定Object設定API
     inline const SceneAPI Scene; //現在Scene操作API
     inline const InputAPI Input; //入力取得API
+    inline const ImGuiAPI ImGui; //共通MainのUI Callback専用Dear ImGui入口
     inline const AdvancedAPI Advanced; //低Level Engine API入口
 
     inline void Log(const std::string& message)
@@ -1405,12 +1640,27 @@ namespace EngineGame
         void (*EndDestroy)() = nullptr; //全Scene End後の最終解放通知
     };
 
+    //全Sceneより外側で一度だけ動作する共通Main定義
+    struct MainProgramDefinition final
+    {
+        void (*Init)();
+        void (*Update)(float deltaTime);
+        void (*End)();
+        void (*UserInterface)();
+    };
+
     namespace Detail
     {
         inline std::vector<const SceneProgramDefinition*>& SceneDefinitions()
         {
             static std::vector<const SceneProgramDefinition*> Definitions; //登録Scene定義
             return Definitions;
+        }
+
+        inline const MainProgramDefinition*& MainDefinition()
+        {
+            static const MainProgramDefinition* Definition = nullptr;
+            return Definition;
         }
     }
 
@@ -1423,6 +1673,18 @@ namespace EngineGame
                 definition->SceneName[0] != '\0')
             {
                 Detail::SceneDefinitions().push_back(definition);
+            }
+        }
+    };
+
+    class MainProgramRegistration final
+    {
+    public:
+        explicit MainProgramRegistration(const MainProgramDefinition* definition)
+        {
+            if (definition != nullptr && Detail::MainDefinition() == nullptr)
+            {
+                Detail::MainDefinition() = definition;
             }
         }
     };
@@ -1456,12 +1718,33 @@ namespace EngineGame
             const SceneProgramDefinition* Definition = nullptr;
             std::uint32_t SceneID = 0;
             bool Initialized = false;
+            bool UpdatedThisFrame = false;
         };
 
         struct SceneProgramState final
         {
             const EngineHostAPI* Host = nullptr;
             std::vector<SceneProgramEntry> Entries;
+        };
+
+        inline thread_local SceneProgramState* ActiveProgramState = nullptr;
+
+        class ScopedProgramState final
+        {
+        public:
+            explicit ScopedProgramState(SceneProgramState* state)
+                : Previous(ActiveProgramState)
+            {
+                ActiveProgramState = state;
+            }
+
+            ~ScopedProgramState()
+            {
+                ActiveProgramState = Previous;
+            }
+
+        private:
+            SceneProgramState* Previous;
         };
 
         inline bool FindSceneInformation(
@@ -1501,10 +1784,20 @@ namespace EngineGame
             return false;
         }
 
-        inline void SynchronizeScenes(SceneProgramState& state)
+        inline bool SynchronizeScenes(
+            SceneProgramState& state,
+            const char* sceneName = nullptr
+        )
         {
+            bool Synchronized = false;
             for (SceneProgramEntry& Entry : state.Entries)
             {
+                if (sceneName != nullptr &&
+                    std::string(Entry.Definition->SceneName) != sceneName)
+                {
+                    continue;
+                }
+
                 EngineExternalSceneInfo Information{}; //対応Scene情報
 
                 if (FindSceneInformation(
@@ -1522,6 +1815,7 @@ namespace EngineGame
                         Entry.Definition->Init();
                         Entry.Initialized = true;
                     }
+                    Synchronized = true;
                 }
                 else if (Entry.Initialized)
                 {
@@ -1539,13 +1833,16 @@ namespace EngineGame
                     Entry.Initialized = false;
                 }
             }
+            return Synchronized;
         }
+
+        inline bool RunRegisteredScenes(float deltaTime, const char* sceneName);
 
         inline void* CreateSceneProgram(const EngineHostAPI* host)
         {
             if (host == nullptr || host->AbiVersion != EngineExtensionAbiVersion ||
                 host->GetSceneCount == nullptr || host->GetSceneInfo == nullptr ||
-                SceneDefinitions().empty())
+                (SceneDefinitions().empty() && MainDefinition() == nullptr))
             {
                 return nullptr;
             }
@@ -1563,10 +1860,19 @@ namespace EngineGame
 
                 for (const SceneProgramDefinition* Definition : SceneDefinitions())
                 {
-                    State->Entries.push_back({ Definition, 0, false });
+                    State->Entries.push_back({ Definition, 0, false, false });
                 }
 
-                SynchronizeScenes(*State);
+                if (MainDefinition() != nullptr)
+                {
+                    const ScopedProgramState ProgramContext(State);
+                    const ScopedSceneContext Context(host, 0); //Scene非依存の共通Main Context
+                    MainDefinition()->Init();
+                }
+                else
+                {
+                    SynchronizeScenes(*State);
+                }
                 return State;
             }
             catch (...)
@@ -1614,6 +1920,13 @@ namespace EngineGame
                 }
             }
 
+            if (MainDefinition() != nullptr)
+            {
+                const ScopedProgramState ProgramContext(State);
+                const ScopedSceneContext Context(State->Host, 0); //共通Main終了Context
+                MainDefinition()->End();
+            }
+
             delete State;
         }
 
@@ -1626,26 +1939,120 @@ namespace EngineGame
                 return;
             }
 
-            SynchronizeScenes(*State);
-
             for (SceneProgramEntry& Entry : State->Entries)
             {
-                EngineExternalSceneInfo Information{}; //Active確認用情報
+                Entry.UpdatedThisFrame = false;
+            }
 
-                if (Entry.Initialized && FindSceneInformation(
+            if (MainDefinition() != nullptr)
+            {
+                const ScopedProgramState ProgramContext(State);
+                const ScopedSceneContext Context(State->Host, 0); //共通Main更新Context
+                MainDefinition()->Update(deltaTime);
+            }
+            else
+            {
+                const ScopedProgramState ProgramContext(State);
+                RunRegisteredScenes(deltaTime, nullptr);
+            }
+        }
+
+        inline void BuildSceneProgramUserInterface(void* instance)
+        {
+            SceneProgramState* State = static_cast<SceneProgramState*>(instance);
+            if (State == nullptr || MainDefinition() == nullptr ||
+                MainDefinition()->UserInterface == nullptr)
+            {
+                return;
+            }
+
+            const ScopedProgramState ProgramContext(State);
+            const ScopedSceneContext Context(State->Host, 0);
+            MainDefinition()->UserInterface();
+        }
+
+        inline bool RunRegisteredScenes(float deltaTime, const char* sceneName)
+        {
+            SceneProgramState* State = ActiveProgramState;
+            if (State == nullptr)
+            {
+                return false;
+            }
+
+            SynchronizeScenes(*State, sceneName);
+            bool Ran = false;
+            for (SceneProgramEntry& Entry : State->Entries)
+            {
+                if (sceneName != nullptr && std::string(Entry.Definition->SceneName) != sceneName)
+                {
+                    continue;
+                }
+
+                EngineExternalSceneInfo Information{};
+                if (Entry.Initialized && !Entry.UpdatedThisFrame && FindSceneInformation(
                     State->Host,
                     nullptr,
                     Entry.SceneID,
                     Information
                 ) && Information.Active)
                 {
-                    const ScopedSceneContext Context(State->Host, Entry.SceneID); //Update Context
+                    const ScopedSceneContext Context(State->Host, Entry.SceneID);
                     Entry.Definition->Update(deltaTime);
+                    Entry.UpdatedThisFrame = true;
+                    Ran = true;
                 }
             }
+            return Ran;
         }
     }
+
+    //共通Mainから全Scene cppを登録順で呼ぶSystem関数
+    inline void RunScenes(float deltaTime)
+    {
+        Detail::RunRegisteredScenes(deltaTime, nullptr);
+    }
+
+    //共通Mainから指定Scene cppだけを呼び、残りをRunScenesで続けられるSystem関数
+    inline bool RunScene(const std::string& sceneName, float deltaTime)
+    {
+        return !sceneName.empty() && Detail::RunRegisteredScenes(deltaTime, sceneName.c_str());
+    }
+
+    //共通MainのInitからScene固有Initを先に確定させる関数
+    inline void InitializeScenes()
+    {
+        if (Detail::ActiveProgramState != nullptr)
+        {
+            Detail::SynchronizeScenes(*Detail::ActiveProgramState);
+        }
+    }
+
+    //共通MainのInitから指定Scene cppだけを先に初期化する関数
+    inline bool InitializeScene(const std::string& sceneName)
+    {
+        return Detail::ActiveProgramState != nullptr && !sceneName.empty() &&
+            Detail::SynchronizeScenes(
+                *Detail::ActiveProgramState,
+                sceneName.c_str()
+            );
+    }
 }
+
+#define ENGINE_REGISTER_MAIN(MainIdentifier) \
+    namespace \
+    { \
+        const EngineGame::MainProgramDefinition MainIdentifier##ProgramDefinition \
+        { \
+            Game::MainIdentifier::Init, \
+            Game::MainIdentifier::Update, \
+            Game::MainIdentifier::End, \
+            Game::MainIdentifier::UserInterface \
+        }; \
+        const EngineGame::MainProgramRegistration MainIdentifier##ProgramRegistration \
+        { \
+            &MainIdentifier##ProgramDefinition \
+        }; \
+    }
 
 #define ENGINE_REGISTER_NAMED_SCENE(SceneIdentifier, EngineSceneName) \
     namespace \

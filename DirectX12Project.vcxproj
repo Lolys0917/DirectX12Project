@@ -70,6 +70,11 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)ThirdParty\imgui;$(ProjectDir)ThirdParty\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -173,6 +178,7 @@
     <ClInclude Include="GraphicBase.h" />
     <ClInclude Include="Grid.h" />
     <ClInclude Include="HalfSphere.h" />
+    <ClInclude Include="ImGuiLayer.h" />
     <ClInclude Include="IRenderable.h" />
     <ClInclude Include="MainScene.h" />
     <ClInclude Include="NativeScripts.h" />
@@ -180,6 +186,7 @@
     <ClInclude Include="MessageLog.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="Object.h" />
+    <ClInclude Include="ObjectFolder.h" />
     <ClInclude Include="ObjectManager.h" />
     <ClInclude Include="ObjectSkyBox.h" />
     <ClInclude Include="OBJModel.h" />
@@ -226,12 +233,19 @@
     <ClCompile Include="GraphicBase.cpp" />
     <ClCompile Include="Grid.cpp" />
     <ClCompile Include="HalfSphere.cpp" />
+    <ClCompile Include="ImGuiLayer.cpp" />
+    <ClCompile Include="ThirdParty\imgui\imgui.cpp" />
+    <ClCompile Include="ThirdParty\imgui\imgui_draw.cpp" />
+    <ClCompile Include="ThirdParty\imgui\imgui_tables.cpp" />
+    <ClCompile Include="ThirdParty\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="ThirdParty\imgui\backends\imgui_impl_dx12.cpp" />
     <ClCompile Include="MainScene.cpp" />
     <ClCompile Include="NativeScripts.cpp" />
     <ClCompile Include="MeshComponent.cpp" />
     <ClCompile Include="MessageLog.cpp" />
     <ClCompile Include="Model.cpp" />
     <ClCompile Include="Object.cpp" />
+    <ClCompile Include="ObjectFolder.cpp" />
     <ClCompile Include="ObjectManager.cpp" />
     <ClCompile Include="ObjectSkyBox.cpp" />
     <ClCompile Include="OBJModel.cpp" />
@@ -273,6 +287,7 @@
     <None Include="ENGINE_EXTENSION_GUIDE.md" />
     <None Include="GAMEPLAY_API_GUIDE.md" />
     <None Include="SCRIPT_SYSTEM.md" />
+    <None Include="ThirdParty\imgui\LICENSE.txt" />
     <None Include="Templates\EngineExtension\MainProgramAdapter.cpp" />
     <None Include="Templates\ObjectScript\README.md" />
     <None Include="Templates\ObjectScript\BoxKeyboardColorScript.cpp" />

@@ -652,7 +652,7 @@ namespace Engine
         Saving.store(false);
     }
 
-    //概要：Main Scene又はObject Scriptの既定Sourceを必要時だけ生成する
+    //概要：共通Main又はObject Scriptの既定Sourceを必要時だけ生成する
     //引数：sourcePath=既存又は生成した既定Source Pathの格納先
     //戻り値：Workspace既定Sourceを使用可能にできた場合はtrue
     bool ProgramWorkspace::EnsureDefaultSource(std::filesystem::path& sourcePath)
@@ -662,8 +662,25 @@ namespace Engine
             return EnsureScriptTemplate(sourcePath);
         }
 
-        sourcePath = ProgramDirectory / L"MainScene.cpp";
-        std::error_code Error; //既存Scene Source確認結果
+        sourcePath = ProgramDirectory / L"Main.cpp";
+        const std::filesystem::path HeaderPath = ProgramDirectory / L"Main.h";
+        std::error_code Error; //既存共通Main Source確認結果
+
+        if (!std::filesystem::exists(HeaderPath, Error))
+        {
+            const std::wstring HeaderTemplate =
+                L"#pragma once\r\n\r\n"
+                L"#include <cstdint>\r\n\r\n"
+                L"namespace Game::Main\r\n"
+                L"{\r\n"
+                L"    extern std::uint64_t FrameCount;\r\n"
+                L"    extern float ElapsedTime;\r\n"
+                L"}\r\n";
+            if (!SaveSourceFile(HeaderPath, HeaderTemplate))
+            {
+                return false;
+            }
+        }
 
         if (std::filesystem::exists(sourcePath, Error))
         {
@@ -671,22 +688,51 @@ namespace Engine
         }
 
         const std::wstring Template =
+            L"#include \"Main.h\"\r\n"
             L"#include \"GameEngineAPI.h\"\r\n\r\n"
             L"using namespace EngineGame;\r\n\r\n"
-            L"namespace Game::MainScene\r\n"
+            L"namespace Game::Main\r\n"
             L"{\r\n"
+            L"    std::uint64_t FrameCount = 0;\r\n"
+            L"    float ElapsedTime = 0.0f;\r\n\r\n"
             L"    void Init()\r\n"
             L"    {\r\n"
+            L"        FrameCount = 0;\r\n"
+            L"        ElapsedTime = 0.0f;\r\n"
+            L"        //InitializeScene(\"SceneName\")を先に呼ぶと初期化順を指定できます。\r\n"
+            L"        InitializeScenes();\r\n"
             L"    }\r\n\r\n"
             L"    void Update(float deltaTime)\r\n"
             L"    {\r\n"
-            L"        (void)deltaTime;\r\n"
+            L"        ++FrameCount;\r\n"
+            L"        ElapsedTime += deltaTime;\r\n"
+            L"        RunScenes(deltaTime);\r\n"
             L"    }\r\n\r\n"
             L"    void End()\r\n"
             L"    {\r\n"
             L"    }\r\n"
+            L"\r\n"
+            L"    void UserInterface()\r\n"
+            L"    {\r\n"
+            L"        const bool Visible = ImGui.Begin(\"Runtime Status\");\r\n"
+            L"        if (Visible && ImGui.BeginTabBar(\"StatusTabs\"))\r\n"
+            L"        {\r\n"
+            L"            if (ImGui.BeginTabItem(\"Game State\"))\r\n"
+            L"            {\r\n"
+            L"                ImGui.Text(\"Scene / Object / Component status\");\r\n"
+            L"                ImGui.EndTabItem();\r\n"
+            L"            }\r\n"
+            L"            if (ImGui.BeginTabItem(\"PC State\"))\r\n"
+            L"            {\r\n"
+            L"                ImGui.Text(\"CPU / memory status\");\r\n"
+            L"                ImGui.EndTabItem();\r\n"
+            L"            }\r\n"
+            L"            ImGui.EndTabBar();\r\n"
+            L"        }\r\n"
+            L"        ImGui.End();\r\n"
+            L"    }\r\n"
             L"}\r\n\r\n"
-            L"ENGINE_REGISTER_SCENE(MainScene)\r\n"; //既定Main Scene雛形
+            L"ENGINE_REGISTER_MAIN(Main)\r\n"; //全Sceneを呼ぶ共通Main雛形
         return SaveSourceFile(sourcePath, Template);
     }
 

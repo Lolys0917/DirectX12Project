@@ -21,6 +21,7 @@
 #include <memory>
 
 #include "GraphicBase.h"
+#include "ImGuiLayer.h"
 #include "SceneManager.h"
 
 namespace Engine
@@ -95,8 +96,29 @@ namespace Engine
         DirectX12& GetDirectX12();
         const DirectX12& GetDirectX12() const;
 
+        bool BeginImGuiFrame(float deltaTime);
+        bool BeginImGuiWindow(const char* name);
+        void EndImGuiWindow();
+        void ImGuiText(const char* text);
+        bool ImGuiButton(const char* label);
+        bool BeginImGuiTabBar(const char* identifier);
+        void EndImGuiTabBar();
+        bool BeginImGuiTabItem(const char* label);
+        void EndImGuiTabItem();
+        bool ImGuiCollapsingHeader(const char* label, bool defaultOpen);
+        void ImGuiSeparator();
+        void ImGuiProgressBar(float fraction, const char* overlay);
+        void ImGuiPlotLines(
+            const char* label,
+            const float* values,
+            std::uint32_t valueCount,
+            float minimum,
+            float maximum
+        );
+
     private:
         GraphicBase Graphics; // DirectX 12描画基盤の所有者
+        ImGuiLayer ImmediateUI; //外部Mainから構築するDear ImGui描画層
         SceneManager Scenes; // 全SceneとViewScene状態の所有者
         std::unique_ptr<SceneManager> PlaybackSnapshot; //再生開始直前のCPU Scene定義
         HWND RenderWindow; //Game入力Focusを受け取る描画子Window

@@ -36,6 +36,12 @@ namespace
     {
         EngineGame::Detail::UpdateSceneProgram(instance, deltaTime);
     }
+
+    //停止中を含む描画Frameごとに共通MainのDear ImGui構築Callbackを呼ぶ
+    void ENGINE_EXTENSION_CALL BuildProgramUserInterface(void* instance)
+    {
+        EngineGame::Detail::BuildSceneProgramUserInterface(instance);
+    }
 }
 
 //概要：Engineが共通名から取得するScene Main Program定義を返す
@@ -55,7 +61,8 @@ ENGINE_EXTENSION_CALL EngineGetExtensionModule(std::uint32_t requestedAbiVersion
         UpdateProgram,
         nullptr,
         nullptr,
-        nullptr
+        nullptr,
+        BuildProgramUserInterface
     };
     return requestedAbiVersion == EngineExtensionAbiVersion ? &Descriptor : nullptr;
 }

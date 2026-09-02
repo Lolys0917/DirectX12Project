@@ -28,8 +28,10 @@
 #include "HalfSphere.h"
 #include "MessageLog.h"
 #include "Object.h"
+#include "ObjectFolder.h"
 #include "ObjectManager.h"
 #include "Plane.h"
+#include "PlaybackSettings.h"
 #include "PrimitiveObject.h"
 #include "ProgramSuggestionRegistry.h"
 #include "RotationScript.h"
@@ -61,6 +63,7 @@ namespace Engine
             case ObjectType::HalfSphere: return "HalfSphere";
             case ObjectType::Capsule: return "Capsule";
             case ObjectType::SkyBox: return "SkyBox";
+            case ObjectType::Folder: return "Folder";
             default: return "Unknown";
             }
         }
@@ -149,6 +152,8 @@ namespace Engine
         , Scripts()
         , Modules(Scripts)
         , Extensions(*this)
+        , EditorSelectionScene()
+        , EditorSelectionObject()
         , Revision(1)
     {
         Scripts.RegisterNativeScript<RotationScript>(
@@ -516,6 +521,7 @@ namespace Engine
         case ObjectType::Cylinder: CreatedObject = Objects.CreateObject<Cylinder>(Name); break;
         case ObjectType::HalfSphere: CreatedObject = Objects.CreateObject<HalfSphere>(Name); break;
         case ObjectType::Capsule: CreatedObject = Objects.CreateObject<Capsule>(Name); break;
+        case ObjectType::Folder: CreatedObject = Objects.CreateObject<ObjectFolder>(Name); break;
         default: return nullptr;
         }
 
@@ -1131,6 +1137,140 @@ namespace Engine
         Extensions.Update(deltaTime);
     }
 
+    bool EngineAPI::BuildExtensionUserInterface()
+    {
+        return Extensions.BuildUserInterface();
+    }
+
+    bool EngineAPI::HasExtensionUserInterface() const
+    {
+        return Extensions.HasUserInterface();
+    }
+
+    bool EngineAPI::BeginImGuiWindow(const char* name)
+    {
+        return Application.BeginImGuiWindow(name);
+    }
+
+    void EngineAPI::EndImGuiWindow()
+    {
+        Application.EndImGuiWindow();
+    }
+
+    void EngineAPI::ImGuiText(const char* text)
+    {
+        Application.ImGuiText(text);
+    }
+
+    bool EngineAPI::ImGuiButton(const char* label)
+    {
+        return Application.ImGuiButton(label);
+    }
+
+    bool EngineAPI::BeginImGuiTabBar(const char* identifier)
+    {
+        return Application.BeginImGuiTabBar(identifier);
+    }
+
+    void EngineAPI::EndImGuiTabBar()
+    {
+        Application.EndImGuiTabBar();
+    }
+
+    bool EngineAPI::BeginImGuiTabItem(const char* label)
+    {
+        return Application.BeginImGuiTabItem(label);
+    }
+
+    void EngineAPI::EndImGuiTabItem()
+    {
+        Application.EndImGuiTabItem();
+    }
+
+    bool EngineAPI::ImGuiCollapsingHeader(const char* label, bool defaultOpen)
+    {
+        return Application.ImGuiCollapsingHeader(label, defaultOpen);
+    }
+
+    void EngineAPI::ImGuiSeparator()
+    {
+        Application.ImGuiSeparator();
+    }
+
+    void EngineAPI::ImGuiProgressBar(float fraction, const char* overlay)
+    {
+        Application.ImGuiProgressBar(fraction, overlay);
+    }
+
+    void EngineAPI::ImGuiPlotLines(
+        const char* label,
+        const float* values,
+        std::uint32_t valueCount,
+        float minimum,
+        float maximum
+    )
+    {
+        Application.ImGuiPlotLines(label, values, valueCount, minimum, maximum);
+    }
+
+    //停止又は一時停止中のViewport入力だけをEditor状態へ反映する
+    bool EngineAPI::UpdateEditorNavigation(float deltaTime)
+    {
+        if (!(deltaTime > 0.0f) || !GameInput::HasFocus())
+        {
+            return false;
+        }
+
+        Scene* ViewScene = ResolveScene(GetViewSceneID());
+        if (ViewScene == nullptr)
+        {
+            return false;
+        }
+
+        bool Changed = false;
+        Camera* ViewCamera = ViewScene->GetPrimaryCamera();
+        if (ViewCamera != nullptr)
+        {
+            const DirectX::XMFLOAT3 Before = ViewCamera->GetPosition();
+            ViewCamera->Update(deltaTime);
+            const DirectX::XMFLOAT3 After = ViewCamera->GetPosition();
+            Changed = Before.x != After.x || Before.y != After.y || Before.z != After.z;
+        }
+
+        if (EditorSelectionScene == GetViewSceneID() && EditorSelectionObject.IsValid())
+        {
+            Object* Selected = ViewScene->GetObjectManager().FindObject(EditorSelectionObject);
+            if (Selected != nullptr && Selected->GetType() != ObjectType::Folder)
+            {
+                DirectX::XMFLOAT3 Position = Selected->GetPosition();
+                DirectX::XMFLOAT3 Movement{};
+                const float Speed = ActivePlaybackSettings.CameraSpeed *
+                    (GameInput::IsKeyDown(VK_SHIFT) ? 4.0f : 1.0f) * deltaTime;
+                if (GameInput::IsKeyDown('A')) Movement.x -= Speed;
+                if (GameInput::IsKeyDown('D')) Movement.x += Speed;
+                if (GameInput::IsKeyDown('Q')) Movement.y -= Speed;
+                if (GameInput::IsKeyDown('E')) Movement.y += Speed;
+                if (GameInput::IsKeyDown('W')) Movement.z += Speed;
+                if (GameInput::IsKeyDown('S')) Movement.z -= Speed;
+
+                if (Movement.x != 0.0f || Movement.y != 0.0f || Movement.z != 0.0f)
+                {
+                    Position.x += Movement.x;
+                    Position.y += Movement.y;
+                    Position.z += Movement.z;
+                    Selected->SetPosition(Position);
+                    Changed = true;
+                }
+            }
+        }
+
+        if (Changed)
+        {
+            IncrementRevision();
+        }
+        return Changed;
+    }
+
     bool EngineAPI::SetScriptMember(
         SceneID sceneID,
         ComponentID componentID,
@@ -1411,6 +1551,11 @@ namespace Engine
             Extensions.Unload();
             Succeeded = true;
             break;
+
+        case EditorCommandType::SetEditorSelection:
+            EditorSelectionScene = command.Scene;
+            EditorSelectionObject = command.Object;
+            return true;
 
         case EditorCommandType::Refresh:
             Succeeded = true;

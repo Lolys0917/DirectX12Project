@@ -133,6 +133,7 @@ namespace Engine
         LoadScriptModule,
         LoadExtensionModule,
         UnloadExtensionModule,
+        SetEditorSelection,
         Refresh
         , SetPlaybackSettings
         , PreviewAsset

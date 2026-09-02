@@ -1,6 +1,6 @@
 # Background Compile・Hot Reload・外部APIメモ
 
-更新日: 2026-08-19
+更新日: 2026-09-02
 
 ## 実装場所
 
@@ -11,7 +11,9 @@
 | Native内部の読取・編集Facade | `EngineAPI.h` / `EngineAPI.cpp` |
 | 自動保存、簡易構文判定、Background MSBuild | `ProgramWorkspace.h` / `ProgramWorkspace.cpp` |
 | ProgramタブのDebounce、コード補完、結果表示、反映要求 | `WinApp.h` / `WinApp.cpp` |
-| Sceneごとの簡易Main Program | `Programs/MainScene.cpp` |
+| 全Scene共通Main Program | `Programs/Main.h` / `Programs/Main.cpp` |
+| SceneごとのMain Program | `Programs/MainScene.cpp` |
+| Engine所有Dear ImGui描画層 | `ImGuiLayer.h` / `ImGuiLayer.cpp` |
 | Main Programから隠蔽するDLL Adapter | `Templates/EngineExtension/MainProgramAdapter.cpp` |
 | Program DLLビルド定義 | `Programs/UserPrograms.vcxproj` |
 | Object ScriptタブのBox・Keyboard・色変更例 | `ScriptPrograms/BoxKeyboardColorScript.cpp` |
@@ -29,8 +31,8 @@
 2. 通常文字列、文字Literal、行・ブロックコメントを除外して `()[]{}` の対応を調べ、未完成コードを模倣判定する。
 3. 保存完了と判定通過後だけMSBuildをCompile Workerで実行する。編集UI、保存、Game Runtimeは互いを待たない。
 4. 成功DLLを `Programs/.hotreload/UserPrograms_<revision>_<time>.dll` へ複写する。
-5. メインスレッドのフレーム境界でDLLとABIを検証し、Scene名に対応する`Init`を呼ぶ。
-6. Active Sceneだけ`Update`し、Scene削除、Hot Reload又はDLL解放時に`End`を呼ぶ。
+5. メインスレッドのフレーム境界でDLLとABIを検証し、共通`Main::Init`からScene名に対応する`Init`を呼ぶ。
+6. 共通`Main::Update`が`RunScenes`又は`RunScene`でActive Sceneを更新し、Scene削除、Hot Reload又はDLL解放時にSceneの`End`、最後に共通`Main::End`を呼ぶ。
 7. 失敗時は稼働中の旧DLLを残す。
 
 手動コンパイルボタンも同じBackground経路を使い、Debounceだけを省略する。自動処理は実コンパイラの代用ではないため、簡易判定後の型・Link ErrorはMSBuild診断へ表示する。
@@ -58,7 +60,13 @@ void Game::MainScene::Init()
 }
 ```
 
-各Scene Sourceは`Init()`、`Update(float deltaTime)`、`End()`と末尾の`ENGINE_REGISTER_SCENE`だけを持つ。DLL Export、Instance作成、Scene ID解決は固定Adapterが担当する。`SetSize`の3値はX幅、Y高さ、Z奥行きである。CapsuleとCylinderはX/Zの大きい方を直径、Yを全高として使用し、Sphere系は最大軸を直径として使用する。
+各Scene Sourceは`Init()`、`Update(float deltaTime)`、`End()`と末尾の`ENGINE_REGISTER_SCENE`だけを持つ。共通`Main.cpp`は`Init()`、`Update(float deltaTime)`、`End()`、`UserInterface()`と`ENGINE_REGISTER_MAIN`を持つ。初期化は`InitializeScene("SceneName")`を必要な順に呼んだ後、`InitializeScenes()`で残りを初期化できる。更新も`RunScene("SceneName", deltaTime)`を必要な順に呼び、最後に`RunScenes(deltaTime)`を呼ぶと、未更新Sceneだけを登録順で続けられる。DLL Export、Instance作成、Scene ID解決は固定Adapterが担当する。`SetSize`の3値はX幅、Y高さ、Z奥行きである。CapsuleとCylinderはX/Zの大きい方を直径、Yを全高として使用し、Sphere系は最大軸を直径として使用する。
+
+Hierarchy整理用には`AddObject.CreateFolder`を使い、`ObjectHandle::SetParent`又は一括生成関数の`parentObjectID`へFolder IDを渡す。Folderは非描画Objectであり、子Objectの親子Transformと再帰削除は既存Hierarchy規則に従う。
+
+`UserInterface()`では`ImGui.Begin`、`Text`、`Button`、`BeginTabBar`、`BeginTabItem`、`CollapsingHeader`、`ProgressBar`、`PlotLines`などを使用できる。Dear ImGui Context、Descriptor Heap、DirectX 12 BackendはEngineが所有し、停止中もUI構築Callbackを呼ぶ。C ABIへは関数Pointerと描画中だけ有効な数値配列Pointerのみを末尾追加し、外部DLLへDear ImGuiのC++型や所有権を渡さない。
+
+組込み例の`Programs/Main.cpp`は0.5秒ごとに状態Snapshotを更新し、`Game State`でScene／Object／Component／Script数、Object型、代表ObjectのTransformを表示する。`PC State`ではWindowsの読取APIからシステム／プロセスCPU、物理Memory、Working Set、Private Memory、Thread、Handleを表示する。CPU、Memory、Frame timeは負荷Bar又は履歴Graphで描画し、Monitor自体が大量Object走査の恒常負荷にならないよう毎描画では再集計しない。
 
 上級者は`Advanced.Host()`から追記専用`EngineHostAPI`を取得し、Scene、Object、Component、Scriptなど既存の低Level APIへ到達できる。旧形式の明示Hostコード向けに`EngineProgramAPI`も互換入口として残す。
 

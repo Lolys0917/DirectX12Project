@@ -315,6 +315,11 @@ namespace Engine
             ObjectType::Object,
             "__DiagnosticsParent"
         )); //親子と汎用Object API検証対象
+        Object* FolderObject = Track(engine.CreateObject(
+            OriginalMainSceneID,
+            ObjectType::Folder,
+            "__DiagnosticsFolder"
+        )); //Hierarchy整理専用Folder検証対象
         Object* BoxObject = Track(engine.CreateObject(
             OriginalMainSceneID,
             ObjectType::Box,
@@ -346,6 +351,8 @@ namespace Engine
         )); //名前指定Capsule APIとScene全体一意名検証対象
 
         Context.Check(ParentObject != nullptr, "Object API | Generic object created");
+        Context.Check(FolderObject != nullptr && FolderObject->GetType() == ObjectType::Folder,
+            "Object API | Folder object created");
         Context.Check(BoxObject != nullptr, "Object API | Box created");
         Context.Check(SphereObject != nullptr, "Object API | Sphere created");
         Context.Check(PlaneObject != nullptr, "Object API | Plane created");
@@ -435,29 +442,29 @@ namespace Engine
             Context.Check(HasMeshExtent(CapsuleObject, 2.0f, 4.0f, 2.0f), "Size API | Capsule CPU mesh extent");
         }
 
-        if (ParentObject != nullptr && BoxObject != nullptr)
+        if (FolderObject != nullptr && BoxObject != nullptr)
         {
             Context.Check(engine.SetObjectParent(
                 OriginalMainSceneID,
                 BoxObject->GetID(),
-                ParentObject->GetID(),
+                FolderObject->GetID(),
                 true
-            ), "Hierarchy | Parent assigned");
+            ), "Hierarchy | Folder parent assigned");
             EditorObjectInfo BoxInformation; //親とTransformの読取結果
             Context.Check(engine.TryGetObjectInfo(
                 OriginalMainSceneID,
                 BoxObject->GetID(),
                 BoxInformation
-            ) && BoxInformation.ParentID == ParentObject->GetID(), "Hierarchy | Parent read back");
+            ) && BoxInformation.ParentID == FolderObject->GetID(), "Hierarchy | Folder parent read back");
             const std::vector<ObjectID> Children = engine.GetChildObjectIDs(
                 OriginalMainSceneID,
-                ParentObject->GetID()
+                FolderObject->GetID()
             ); //親から取得した直接Child一覧
             Context.Check(std::find(Children.begin(), Children.end(), BoxObject->GetID()) != Children.end(),
                 "Hierarchy | Child enumeration");
             Context.Check(!engine.SetObjectParent(
                 OriginalMainSceneID,
-                ParentObject->GetID(),
+                FolderObject->GetID(),
                 BoxObject->GetID(),
                 true
             ), "Hierarchy | Cycle rejected");
@@ -717,6 +724,17 @@ namespace Engine
             Context.Check(Extensions.IsLoaded(), "Extension DLL | Loaded state available");
             Context.Check(Extensions.GetModuleName() == "SceneMainProgram",
                 "Extension DLL | Scene descriptor read");
+            const bool UserInterfaceReady = Extensions.HasUserInterface() &&
+                Application.BeginImGuiFrame(1.0f / 60.0f); //外部Mainの状態Monitor描画準備
+            Context.Check(UserInterfaceReady, "Extension DLL | User interface frame started");
+            if (UserInterfaceReady)
+            {
+                Context.Check(Extensions.BuildUserInterface(),
+                    "Extension DLL | User interface built");
+                Application.Draw();
+                Context.Check(!Graphics.IsFrameOpen(),
+                    "Extension DLL | User interface rendered");
+            }
             ObjectID ExtensionCapsuleID = engine.FindObjectID(
                 OriginalMainSceneID,
                 "MainOscillatingCapsule"

@@ -1106,6 +1106,94 @@ namespace Engine
         {
             return GetEngine(context).IsKeyDown(virtualKey);
         }
+
+        bool ENGINE_EXTENSION_CALL BeginExternalImGuiWindow(void* context, const char* name)
+        {
+            return name != nullptr && GetEngine(context).BeginImGuiWindow(name);
+        }
+
+        void ENGINE_EXTENSION_CALL EndExternalImGuiWindow(void* context)
+        {
+            GetEngine(context).EndImGuiWindow();
+        }
+
+        void ENGINE_EXTENSION_CALL ExternalImGuiText(void* context, const char* text)
+        {
+            if (text != nullptr)
+            {
+                GetEngine(context).ImGuiText(text);
+            }
+        }
+
+        bool ENGINE_EXTENSION_CALL ExternalImGuiButton(void* context, const char* label)
+        {
+            return label != nullptr && GetEngine(context).ImGuiButton(label);
+        }
+
+        bool ENGINE_EXTENSION_CALL BeginExternalImGuiTabBar(void* context, const char* identifier)
+        {
+            return identifier != nullptr &&
+                GetEngine(context).BeginImGuiTabBar(identifier);
+        }
+
+        void ENGINE_EXTENSION_CALL EndExternalImGuiTabBar(void* context)
+        {
+            GetEngine(context).EndImGuiTabBar();
+        }
+
+        bool ENGINE_EXTENSION_CALL BeginExternalImGuiTabItem(void* context, const char* label)
+        {
+            return label != nullptr && GetEngine(context).BeginImGuiTabItem(label);
+        }
+
+        void ENGINE_EXTENSION_CALL EndExternalImGuiTabItem(void* context)
+        {
+            GetEngine(context).EndImGuiTabItem();
+        }
+
+        bool ENGINE_EXTENSION_CALL ExternalImGuiCollapsingHeader(
+            void* context,
+            const char* label,
+            bool defaultOpen
+        )
+        {
+            return label != nullptr && GetEngine(context).ImGuiCollapsingHeader(
+                label,
+                defaultOpen
+            );
+        }
+
+        void ENGINE_EXTENSION_CALL ExternalImGuiSeparator(void* context)
+        {
+            GetEngine(context).ImGuiSeparator();
+        }
+
+        void ENGINE_EXTENSION_CALL ExternalImGuiProgressBar(
+            void* context,
+            float fraction,
+            const char* overlay
+        )
+        {
+            GetEngine(context).ImGuiProgressBar(fraction, overlay);
+        }
+
+        void ENGINE_EXTENSION_CALL ExternalImGuiPlotLines(
+            void* context,
+            const char* label,
+            const float* values,
+            std::uint32_t valueCount,
+            float minimum,
+            float maximum
+        )
+        {
+            GetEngine(context).ImGuiPlotLines(
+                label,
+                values,
+                valueCount,
+                minimum,
+                maximum
+            );
+        }
     }
 
     //概要：Native Engine APIを外部C ABI関数表へ接続する
@@ -1172,6 +1260,18 @@ namespace Engine
         Host.GetObjectInfoByID = GetExternalObjectInfoByID;
         Host.GetComponentInfoByID = GetExternalComponentInfoByID;
         Host.SetObjectOrganization = SetExternalObjectOrganization;
+        Host.BeginImGuiWindow = BeginExternalImGuiWindow;
+        Host.EndImGuiWindow = EndExternalImGuiWindow;
+        Host.ImGuiText = ExternalImGuiText;
+        Host.ImGuiButton = ExternalImGuiButton;
+        Host.BeginImGuiTabBar = BeginExternalImGuiTabBar;
+        Host.EndImGuiTabBar = EndExternalImGuiTabBar;
+        Host.BeginImGuiTabItem = BeginExternalImGuiTabItem;
+        Host.EndImGuiTabItem = EndExternalImGuiTabItem;
+        Host.ImGuiCollapsingHeader = ExternalImGuiCollapsingHeader;
+        Host.ImGuiSeparator = ExternalImGuiSeparator;
+        Host.ImGuiProgressBar = ExternalImGuiProgressBar;
+        Host.ImGuiPlotLines = ExternalImGuiPlotLines;
     }
 
     //概要：稼働中の外部Program Instanceを破棄してDLLを解放する
@@ -1219,8 +1319,11 @@ namespace Engine
 
         Candidate.Descriptor = Entry(EngineExtensionAbiVersion);
 
+        constexpr std::size_t RequiredDescriptorSize =
+            offsetof(EngineExtensionModuleDescriptor, LoadState) +
+            sizeof(decltype(EngineExtensionModuleDescriptor::LoadState));
         if (Candidate.Descriptor == nullptr ||
-            Candidate.Descriptor->Size < sizeof(EngineExtensionModuleDescriptor) ||
+            Candidate.Descriptor->Size < RequiredDescriptorSize ||
             Candidate.Descriptor->AbiVersion != EngineExtensionAbiVersion ||
             Candidate.Descriptor->Create == nullptr ||
             Candidate.Descriptor->Destroy == nullptr ||
@@ -1356,6 +1459,27 @@ namespace Engine
             ActiveModule.Descriptor->Update(ActiveModule.Instance, deltaTime);
             ++FrameNumber;
         }
+    }
+
+    bool ExtensionModuleManager::BuildUserInterface()
+    {
+        if (!HasUserInterface())
+        {
+            return false;
+        }
+
+        ActiveModule.Descriptor->BuildUserInterface(ActiveModule.Instance);
+        return true;
+    }
+
+    bool ExtensionModuleManager::HasUserInterface() const
+    {
+        constexpr std::size_t MemberEnd =
+            offsetof(EngineExtensionModuleDescriptor, BuildUserInterface) +
+            sizeof(decltype(EngineExtensionModuleDescriptor::BuildUserInterface));
+        return ActiveModule.Instance != nullptr && ActiveModule.Descriptor != nullptr &&
+            ActiveModule.Descriptor->Size >= MemberEnd &&
+            ActiveModule.Descriptor->BuildUserInterface != nullptr;
     }
 
     //概要：外部Program Moduleが現在稼働中か判定する

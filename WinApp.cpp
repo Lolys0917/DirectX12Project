@@ -40,6 +40,7 @@
 #include <iterator>
 #include <limits>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 
@@ -338,6 +339,7 @@ namespace Engine
             case ObjectType::Cylinder: return L"Cylinder";
             case ObjectType::HalfSphere: return L"HalfSphere";
             case ObjectType::Capsule: return L"Capsule";
+            case ObjectType::Folder: return L"フォルダー";
             default: return L"Unknown";
             }
         }
@@ -1779,6 +1781,12 @@ namespace Engine
             if (Header->hwndFrom == ObjectTreeHwnd && Header->code == TVN_SELCHANGEDW)
             {
                 UpdateObjectInspector();
+                const EditorTreeNode* Node = GetSelectedTreeNode();
+                EditorCommand Selection;
+                Selection.Type = EditorCommandType::SetEditorSelection;
+                Selection.Scene = Node == nullptr ? SceneID() : Node->Scene;
+                Selection.Object = Node == nullptr ? ObjectID() : Node->Object;
+                QueueEditorCommand(std::move(Selection));
                 return 0;
             }
 
@@ -3425,23 +3433,44 @@ namespace Engine
             SceneNode.Active = Scene.Active;
             HTREEITEM SceneItem = InsertNode(TVI_ROOT, SceneLabel, SceneNode); //Scene Root Item
 
+            std::unordered_set<std::uint32_t> ExistingObjectIDs; //Root判定用ID集合
+            std::unordered_map<std::uint32_t, std::vector<const EditorObjectInfo*>> ChildrenByParent;
+            ExistingObjectIDs.reserve(Scene.Objects.size());
+            ChildrenByParent.reserve(Scene.Objects.size());
+            for (const EditorObjectInfo& Object : Scene.Objects)
+            {
+                ExistingObjectIDs.insert(Object.ID.GetValue());
+                if (Object.ParentID.IsValid())
+                {
+                    ChildrenByParent[Object.ParentID.GetValue()].push_back(&Object);
+                }
+            }
+
             std::function<void(const EditorObjectInfo&, HTREEITEM)> InsertObject;
-            InsertObject = [this, &Scene, &InsertNode, &InsertObject](
+            InsertObject = [this, &Scene, &InsertNode, &InsertObject, &ChildrenByParent](
                 const EditorObjectInfo& Object,
                 HTREEITEM ParentItem
             )
             {
                 std::wstring ObjectLabel = Object.Active ? L"" : L"[無効] "; //Object有効状態Prefix
-                if (!Object.Group.empty())
+                if (Object.Type == ObjectType::Folder)
                 {
-                    ObjectLabel += L"[" + ConvertEditorTextToWide(Object.Group) +
-                        L":" + std::to_wstring(Object.GroupOrder) + L"] ";
+                    ObjectLabel += L"[Folder] ";
+                    ObjectLabel += ConvertEditorTextToWide(Object.Name);
                 }
-                ObjectLabel += L"[L" + std::to_wstring(Object.Layer) + L"] ";
-                ObjectLabel += ConvertEditorTextToWide(Object.Name);
-                ObjectLabel += L" <";
-                ObjectLabel += GetObjectMenuName(Object.Type);
-                ObjectLabel += L">";
+                else
+                {
+                    if (!Object.Group.empty())
+                    {
+                        ObjectLabel += L"[" + ConvertEditorTextToWide(Object.Group) +
+                            L":" + std::to_wstring(Object.GroupOrder) + L"] ";
+                    }
+                    ObjectLabel += L"[L" + std::to_wstring(Object.Layer) + L"] ";
+                    ObjectLabel += ConvertEditorTextToWide(Object.Name);
+                    ObjectLabel += L" <";
+                    ObjectLabel += GetObjectMenuName(Object.Type);
+                    ObjectLabel += L">";
+                }
 
                 EditorTreeNode ObjectNode; //Object Itemに対応するNode情報
                 ObjectNode.Kind = EditorTreeNodeKind::Object;
@@ -3454,11 +3483,15 @@ namespace Engine
                     ObjectNode
                 ); //Object Tree Item
 
-                for (const EditorObjectInfo& Child : Scene.Objects)
+                const auto Children = ChildrenByParent.find(Object.ID.GetValue());
+                if (Children != ChildrenByParent.end())
                 {
-                    if (Child.ParentID == Object.ID)
+                    for (const EditorObjectInfo* Child : Children->second)
                     {
-                        InsertObject(Child, ObjectItem);
+                        if (Child != nullptr)
+                        {
+                            InsertObject(*Child, ObjectItem);
+                        }
                     }
                 }
 
@@ -3484,14 +3517,8 @@ namespace Engine
 
             for (const EditorObjectInfo& Object : Scene.Objects)
             {
-                const bool ParentExists = std::any_of(
-                    Scene.Objects.begin(),
-                    Scene.Objects.end(),
-                    [&Object](const EditorObjectInfo& candidate)
-                    {
-                        return Object.ParentID.IsValid() && candidate.ID == Object.ParentID;
-                    }
-                ); //Snapshot内に有効な親が存在する場合true
+                const bool ParentExists = Object.ParentID.IsValid() &&
+                    ExistingObjectIDs.contains(Object.ParentID.GetValue()); //Snapshot内の親存在
 
                 if (!ParentExists)
                 {
@@ -4477,6 +4504,7 @@ namespace Engine
 
         constexpr ObjectType CreatableTypes[] =
         {
+            ObjectType::Folder,
             ObjectType::Object,
             ObjectType::Box,
             ObjectType::Sphere,
@@ -4508,7 +4536,7 @@ namespace Engine
         DestroyMenu(Menu);
 
         if (SelectedCommand < CreateObjectMenuBase ||
-            SelectedCommand > CreateObjectMenuBase + static_cast<UINT>(ObjectType::Capsule))
+            SelectedCommand >= CreateObjectMenuBase + static_cast<UINT>(ObjectType::Count))
         {
             return;
         }
@@ -5105,7 +5133,7 @@ namespace Engine
             ProgramRoleLabelHwnd,
             scriptWorkspace
                 ? L"スクリプト（サブ）：ObjectへAttachし、Unityのスクリプト相当として毎フレーム実行します。"
-                : L"メイン：SceneごとのInit／Update／Endを名前指定の簡易APIで実装します。"
+                : L"メイン：共通MainからSceneごとのInit／Update／Endを呼び、全体状態と処理順を管理します。"
         );
         RefreshProgramFiles();
         EnableWindow(
